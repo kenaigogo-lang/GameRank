@@ -1,13 +1,13 @@
 
 const PROXY_URL = "https://corsproxy.io/?";
-const CLIENT_ID = "mbg8bt1y5si0axlkowfc1xs5crf1zw";
-const CLIENT_SECRET = "e7zvesgcxgiy94ovthixzqrgloe4mi";
+const CLIENT_ID = import.meta.env.VITE_IGDB_CLIENT_ID;
+const CLIENT_SECRET = import.meta.env.VITE_IGDB_CLIENT_SECRET;
 const AUTH_URL = "https://id.twitch.tv/oauth2/token";
 const IGDB_API_URL = "https://api.igdb.com/v4/games";
 
 // Google Custom Search Config
-const GOOGLE_API_KEY = "AIzaSyB3ewWWi1ssbLEg5qxf07yt4IBhMIuBudE"; 
-const GOOGLE_CX = "e6d2925d2004145f2";
+const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
+const GOOGLE_CX = import.meta.env.VITE_GOOGLE_CX;
 const GOOGLE_SEARCH_URL = "https://www.googleapis.com/customsearch/v1";
 
 const STEAM_SEARCH_URL = "https://store.steampowered.com/api/storesearch/?l=tchinese&cc=TW&term=";

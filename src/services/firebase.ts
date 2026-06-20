@@ -3,15 +3,15 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/
 import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, getDoc, setDoc } from 'firebase/firestore';
 import { Game, Platform } from '../types';
 
-// TODO: Replace with your actual Firebase config
+// Firebase config from environment variables
 const firebaseConfig = {
-  apiKey: "AIzaSyCfUxiC51h8PDPeejE7SN4lncp__0_iWLQ",
-  authDomain: "gamerankdb.firebaseapp.com",
-  projectId: "gamerankdb",
-  storageBucket: "gamerankdb.firebasestorage.app",
-  messagingSenderId: "593772759968",
-  appId: "1:593772759968:web:d793f413019450c18fb2c5",
-  measurementId: "G-80XWCKYSLP"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
