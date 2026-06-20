@@ -1,0 +1,6 @@
+{
+  "name": "Copy of GameRank",
+  "version": "202512010000",
+  "description": "A premium game rating application allowing users to track, rate, and review games across PS, Switch, and PC. Features AI-powered review generation and game details auto-completion.",
+  "requestFramePermissions": []
+}
