@@ -458,7 +458,7 @@ const App = () => {
             </h1>
           </div>
           
-          <div className="flex items-center gap-2 md:gap-3">
+          <div className="flex flex-1 items-center justify-end gap-2 md:gap-3 flex-wrap">
              <input 
                type="file" 
                ref={fileInputRef} 
@@ -467,7 +467,7 @@ const App = () => {
                className="hidden" 
              />
              
-             <div className="flex items-center gap-2 mr-2">
+             <div className="flex items-center gap-2 md:gap-3 ml-auto">
                 {user ? (
                    <>
                       <div className="hidden md:flex items-center gap-2 px-2 py-1 bg-slate-800 rounded-full border border-slate-700 mr-1">
@@ -485,20 +485,20 @@ const App = () => {
                    </>
                 ) : null}
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2 md:gap-3">
                     <button
                       onClick={handleBackupJSON}
                       className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-all border border-slate-700/50"
                     >
                       <FileJson className="w-3.5 h-3.5" />
-                      <span>Export JSON</span>
+                      <span>Export</span>
                     </button>
                     <button
                       onClick={triggerFileInput}
                       className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-all border border-slate-700/50"
                     >
                       <UploadCloud className="w-3.5 h-3.5" />
-                      <span>Import JSON</span>
+                      <span>Import</span>
                     </button>
                     {user && (
                       <button
