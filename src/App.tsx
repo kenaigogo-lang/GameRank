@@ -345,6 +345,42 @@ const App = () => {
     }
   };
 
+  const handleBackupToFirestore = async () => {
+    if (!user) {
+      setConfirmModal({
+        isOpen: true,
+        title: 'Login Required',
+        message: 'Please log in to back up your games to Firestore.',
+        onConfirm: () => {},
+        isAlert: true
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await saveUserBackupGames(user.uid, games);
+      setConfirmModal({
+        isOpen: true,
+        title: 'Backup Complete',
+        message: 'Your games were backed up to Firestore successfully.',
+        onConfirm: () => {},
+        isAlert: true
+      });
+    } catch (error: any) {
+      console.error('Error backing up games to Firestore', error);
+      setConfirmModal({
+        isOpen: true,
+        title: 'Backup Failed',
+        message: `Unable to back up games to Firestore. ${error?.message || 'Please try again.'}`,
+        onConfirm: () => {},
+        isAlert: true
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const triggerFileInput = () => {
     fileInputRef.current?.click();
   };
@@ -448,7 +484,7 @@ const App = () => {
   return (
     <div className="min-h-screen bg-slate-950 pb-20">
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 backdrop-blur-md bg-opacity-80">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="bg-gradient-to-tr from-blue-600 to-indigo-600 p-2 rounded-lg">
               <Gamepad2 className="w-6 h-6 text-white" />
@@ -458,60 +494,69 @@ const App = () => {
             </h1>
           </div>
 
-          <div className="flex min-w-0 flex-1 items-center justify-center overflow-x-auto pb-0.5">
-            <div className="flex min-w-max items-center gap-2 sm:gap-3">
-              {!user && (
-                <>
-                  <button
-                    onClick={handleBackupJSON}
-                    className="flex items-center gap-2 px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
-                  >
-                    <FileJson className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Export</span>
-                  </button>
-                  <button
-                    onClick={triggerFileInput}
-                    className="flex items-center gap-2 px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
-                  >
-                    <UploadCloud className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Import</span>
-                  </button>
-                </>
-              )}
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 flex-1 min-w-0">
+            <button
+              onClick={handleBackupJSON}
+              title="Export JSON"
+              className="flex items-center justify-center px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
+            >
+              <FileJson className="w-3.5 h-3.5" />
+              {!user ? <span className="hidden sm:inline">Export</span> : <span className="sr-only">Export JSON</span>}
+            </button>
 
-              {user && (
-                <button
-                  onClick={handleRestoreFromFirestore}
-                  className="flex items-center gap-2 px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
-                >
-                  <CloudDownload className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Restore</span>
-                </button>
-              )}
+            <button
+              onClick={triggerFileInput}
+              title="Import JSON"
+              className="flex items-center justify-center px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
+            >
+              <UploadCloud className="w-3.5 h-3.5" />
+              {!user ? <span className="hidden sm:inline">Import</span> : <span className="sr-only">Import JSON</span>}
+            </button>
 
-              {!user && (
-                <button
-                  onClick={handleLogin}
-                  className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Log In</span>
-                </button>
-              )}
+            {user && (
+              <button
+                onClick={handleBackupToFirestore}
+                title="Backup to cloud"
+                className="flex items-center justify-center px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
+              >
+                <ArrowUpDown className="w-3.5 h-3.5" />
+                <span className="sr-only">Backup to cloud</span>
+              </button>
+            )}
 
-              {user && (
-                <button
-                  onClick={handleLogout}
-                  className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"
-                  title="Logout"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              )}
-            </div>
+            {user && (
+              <button
+                onClick={handleRestoreFromFirestore}
+                title="Restore from cloud"
+                className="flex items-center justify-center px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
+              >
+                <CloudDownload className="w-3.5 h-3.5" />
+                <span className="sr-only">Restore from cloud</span>
+              </button>
+            )}
+
+            {!user && (
+              <button
+                onClick={handleLogin}
+                className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Log In</span>
+              </button>
+            )}
+
+            {user && (
+              <button
+                onClick={handleLogout}
+                className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 justify-end">
             <input
               type="file"
               ref={fileInputRef}
