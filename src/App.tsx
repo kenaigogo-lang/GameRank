@@ -154,7 +154,11 @@ const App = () => {
           imageUrl,
           playtime,
         };
-        await updateGame(editingGame.id, updatedGame);
+        try {
+          await updateGame(editingGame.id, updatedGame);
+        } catch (err) {
+          console.warn('Failed to update games collection, updating locally only', err);
+        }
         setGames(prev => prev.map(g => g.id === editingGame.id ? { ...g, ...updatedGame } : g));
         newGameData = [{ id: editingGame.id, ...updatedGame }, ...games.filter(g => g.id !== editingGame.id)];
       } else {
