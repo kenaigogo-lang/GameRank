@@ -155,7 +155,7 @@ const App = () => {
           playtime,
         };
         try {
-          await updateGame(editingGame.id, updatedGame);
+          await updateGame(editingGame.id, updatedGame, user?.uid || undefined);
         } catch (err) {
           console.warn('Failed to update games collection, updating locally only', err);
         }

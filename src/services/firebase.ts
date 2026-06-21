@@ -128,12 +128,14 @@ export const saveUserBackupGames = async (userId: string, games: Game[]): Promis
   }
 };
 
-export const updateGame = async (id: string, game: Partial<Game>): Promise<void> => {
+export const updateGame = async (id: string, game: Partial<Game>, userId?: string): Promise<void> => {
   try {
     const gameRef = doc(db, 'games', id);
-    // Use setDoc with merge to create the document if it doesn't exist
-    // and avoid update failures when editing a locally-created entry.
-    await setDoc(gameRef, game, { merge: true });
+    // Ensure userId is included in the write if provided. This avoids
+    // Firestore rules rejecting the update when request.resource.data.userId
+    // is expected to match request.auth.uid.
+    const payload = userId ? { ...game, userId } : game;
+    await setDoc(gameRef, payload, { merge: true });
   } catch (error) {
     console.error("Error updating game", error);
     throw error;
