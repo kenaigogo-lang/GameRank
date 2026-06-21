@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where, getDoc, setDoc } from 'firebase/firestore';
 import { Game, Platform } from '../types';
 
 // Firebase config from environment variables
@@ -131,7 +131,9 @@ export const saveUserBackupGames = async (userId: string, games: Game[]): Promis
 export const updateGame = async (id: string, game: Partial<Game>): Promise<void> => {
   try {
     const gameRef = doc(db, 'games', id);
-    await updateDoc(gameRef, game);
+    // Use setDoc with merge to create the document if it doesn't exist
+    // and avoid update failures when editing a locally-created entry.
+    await setDoc(gameRef, game, { merge: true });
   } catch (error) {
     console.error("Error updating game", error);
     throw error;
