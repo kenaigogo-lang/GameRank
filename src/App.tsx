@@ -373,13 +373,34 @@ const App = () => {
       });
     } catch (error: any) {
       console.error('Error backing up games to Firestore', error);
-      setConfirmModal({
-        isOpen: true,
-        title: 'Backup Failed',
-        message: `Unable to back up games to Firestore. ${error?.message || 'Please try again.'}`,
-        onConfirm: () => {},
-        isAlert: true
-      });
+
+      // If error looks like a permission issue, fallback to local JSON export
+      const msg = String(error?.message || error || '');
+      const isPermissionError = /permission|authorize|auth|insufficient/i.test(msg);
+
+      if (isPermissionError) {
+        try {
+          handleBackupJSON();
+        } catch (e) {
+          console.error('Failed to create local JSON backup', e);
+        }
+
+        setConfirmModal({
+          isOpen: true,
+          title: 'Backup Saved Locally',
+          message: 'Could not save to Firestore due to permissions. A local JSON backup has been downloaded instead. Please check your Firebase security rules or log in with an account that has write access.',
+          onConfirm: () => {},
+          isAlert: true
+        });
+      } else {
+        setConfirmModal({
+          isOpen: true,
+          title: 'Backup Failed',
+          message: `Unable to back up games to Firestore. ${error?.message || 'Please try again.'}`,
+          onConfirm: () => {},
+          isAlert: true
+        });
+      }
     } finally {
       setIsLoading(false);
     }
