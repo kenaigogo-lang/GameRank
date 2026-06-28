@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where, getDoc, setDoc, writeBatch } from 'firebase/firestore';
 import { Game, Platform } from '../types';
 
 // Firebase config from environment variables
@@ -80,18 +80,41 @@ const normalizeBackupGames = (gamesData: any): any[] => {
 
 export const getUserBackupGames = async (userId: string): Promise<Game[]> => {
   try {
+    const backupDocs = await getDocs(collection(db, 'users', userId, 'backups'));
+    if (!backupDocs.empty) {
+      const gamesData = backupDocs.docs
+        .map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() } as Game & { backupOrder?: number }))
+        .sort((a, b) => (a.backupOrder ?? 0) - (b.backupOrder ?? 0));
+
+      if (gamesData.length > 0) {
+        return gamesData.map((game: any) => {
+          let platform = game.platform;
+          if (game.platform === 'PS5' || game.platform === 'PS') platform = Platform.PS;
+          if (game.platform === 'STEAM' || game.platform === 'PC') platform = Platform.PC;
+          if (game.platform === 'XBOX' || game.platform === 'Xbox') platform = Platform.XBOX;
+          if (game.platform === 'SWITCH' || game.platform === 'Switch') platform = Platform.SWITCH;
+
+          return {
+            ...game,
+            id: game.id || game._id,
+            platform,
+          } as Game;
+        });
+      }
+    }
+
     const userDoc = await getDoc(doc(db, 'users', userId));
     if (!userDoc.exists()) {
       return [];
     }
 
     const data = userDoc.data();
-    const gamesData = normalizeBackupGames(data.games);
-    if (gamesData.length === 0) {
+    const legacyGames = normalizeBackupGames(data.games);
+    if (legacyGames.length === 0) {
       return [];
     }
 
-    return gamesData.map((game: any) => {
+    return legacyGames.map((game: any) => {
       let platform = game.platform;
       if (game.platform === 'PS5' || game.platform === 'PS') platform = Platform.PS;
       if (game.platform === 'STEAM' || game.platform === 'PC') platform = Platform.PC;
@@ -121,7 +144,30 @@ export const addGame = async (game: Omit<Game, 'id'>, userId: string): Promise<s
 
 export const saveUserBackupGames = async (userId: string, games: Game[]): Promise<void> => {
   try {
-    await setDoc(doc(db, 'users', userId), { games }, { merge: true });
+    const backupCollection = collection(db, 'users', userId, 'backups');
+    const existingBackupDocs = await getDocs(backupCollection);
+    const batch = writeBatch(db);
+
+    existingBackupDocs.docs.forEach((backupDoc) => {
+      batch.delete(backupDoc.ref);
+    });
+
+    games.forEach((game, index) => {
+      const backupDocRef = doc(backupCollection, game.id || `backup-${index}`);
+      batch.set(backupDocRef, {
+        ...game,
+        backupOrder: index,
+        updatedAt: Date.now(),
+      });
+    });
+
+    batch.set(doc(db, 'users', userId), {
+      backupVersion: 2,
+      backupUpdatedAt: Date.now(),
+      gameCount: games.length,
+    }, { merge: true });
+
+    await batch.commit();
   } catch (error) {
     console.error('Error saving user backup games', error);
     throw error;
