@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Game, GameInput, Platform, GENRE_OPTIONS, SortOption } from './types';
-import { GameRow } from './components/GameRow';
+import { GameCard, normalizeScore } from './components/GameCard';
 import { AddGameModal } from './components/AddGameModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { signInWithGoogle, logout, getGames, getUserBackupGames, saveUserBackupGames, saveGameRecord, deleteGameRecord, newGameId, auth } from './services/firebase';
@@ -27,8 +27,6 @@ const migrateGameData = (data: any[]): Game[] => {
     return { ...g, platform: newPlatform };
   });
 };
-
-const normalizeScore = (score: number) => (score > 10 ? score / 10 : score);
 
 interface DialogState {
   isOpen: boolean;
@@ -399,61 +397,63 @@ const App = () => {
   };
 
   return (
-    <div className="crt">
-      <header className="top">
-        <div className="util">
-          <span>{user ? (user.displayName || user.email || '已登入') : '訪客（未登入）'}</span>
-          <div className="util-btns">
-            <button type="button" className="link" onClick={handleBackupJSON}>匯出 JSON</button>
-            <button type="button" className="link" onClick={() => fileInputRef.current?.click()}>匯入 JSON</button>
-            {user && <button type="button" className="link" onClick={handleBackupToFirestore}>雲端備份</button>}
-            {user && <button type="button" className="link" onClick={handleRestoreFromFirestore}>雲端還原</button>}
+    <div className="app">
+      <header className="nav">
+        <div className="navin">
+          <div className="brand">
+            <i className="nes-icon trophy is-small" aria-hidden="true" />
+            <h1>GAMERANK</h1>
+          </div>
+          <div className="navact">
+            <span className="who">{user ? (user.displayName || user.email || '已登入') : '訪客'}</span>
+            <button type="button" className="nes-btn sm" onClick={handleBackupJSON}>匯出</button>
+            <button type="button" className="nes-btn sm" onClick={() => fileInputRef.current?.click()}>匯入</button>
+            {user && <button type="button" className="nes-btn sm" onClick={handleBackupToFirestore}>雲端備份</button>}
+            {user && <button type="button" className="nes-btn sm" onClick={handleRestoreFromFirestore}>雲端還原</button>}
             {user
-              ? <button type="button" className="link danger" onClick={handleLogout}>登出</button>
-              : <button type="button" className="link" onClick={handleLogin}>Google 登入</button>}
+              ? <button type="button" className="nes-btn is-error sm" onClick={handleLogout}>登出</button>
+              : <button type="button" className="nes-btn is-warning sm" onClick={handleLogin}>Google 登入</button>}
+            <button type="button" className="nes-btn is-primary sm" onClick={() => setIsModalOpen(true)}>＋ 新增遊戲</button>
+            <input type="file" ref={fileInputRef} onChange={handleRestoreJSON} accept=".json" hidden />
           </div>
-          <input type="file" ref={fileInputRef} onChange={handleRestoreJSON} accept=".json" hidden />
         </div>
-
-        <h1 className="marquee">GAMERANK</h1>
-        <p className="sub">— 我的遊戲排行榜 —</p>
-        <dl className="stats" aria-label={activeTab === 'ALL' ? '全部平台統計' : `${activeTab} 平台統計`}>
-          <div>
-            <dt>遊戲總數</dt>
-            <dd className="c2">{stats.total}<small>款</small></dd>
-          </div>
-          <div>
-            <dt>平均分數</dt>
-            <dd className="c0">{stats.avgScore}<small>/ 10</small></dd>
-          </div>
-          <div>
-            <dt>遊戲總時數</dt>
-            <dd className="c3">{stats.totalPlaytime}<small>小時</small></dd>
-          </div>
-        </dl>
-        <p className="scope">{activeTab === 'ALL' ? '全部平台合計' : `僅計算 ${activeTab} 平台`}</p>
-        <button type="button" className="coin" onClick={() => setIsModalOpen(true)}>
-          <i>INSERT COIN</i>＋ 新增遊戲
-        </button>
-        <p className={`sync${pendingWrites > 0 ? ' busy' : ''}`} role="status" aria-live="polite">
-          {pendingWrites > 0 ? 'NOW SAVING...' : ''}
-        </p>
       </header>
 
       <main className="wrap">
-        <div className="sel" role="tablist" aria-label="平台">
-          <span className="lb">SELECT</span>
+        <section className="nes-container with-title is-rounded sts">
+          <p className="title">PLAYER STATUS</p>
+          <dl className="stg" aria-label={activeTab === 'ALL' ? '全部平台統計' : `${activeTab} 平台統計`}>
+            <div>
+              <dt>遊戲總數</dt>
+              <dd>{stats.total}<small>款</small></dd>
+            </div>
+            <div>
+              <dt>平均分數</dt>
+              <dd className="nes-text is-primary">{stats.avgScore}<small>/10</small></dd>
+            </div>
+            <div>
+              <dt>遊戲總時數</dt>
+              <dd className="nes-text is-success">{stats.totalPlaytime}<small>小時</small></dd>
+            </div>
+          </dl>
+          <progress className="nes-progress is-primary" value={Number(stats.avgScore)} max={10} aria-label="平均分數" />
+          <p className="scope">
+            <span>{activeTab === 'ALL' ? '全部平台合計' : `僅計算 ${activeTab} 平台`}</span>
+            <span className={`sync${pendingWrites > 0 ? ' busy' : ''}`} role="status" aria-live="polite">{pendingWrites > 0 ? 'NOW SAVING...' : ''}</span>
+          </p>
+        </section>
+
+        <div className="ptabs" role="tablist" aria-label="平台">
           {platformTabs.tabs.map(tab => (
             <button
               key={tab}
               type="button"
               role="tab"
               aria-selected={activeTab === tab}
-              className={activeTab === tab ? 'on' : ''}
+              className={`nes-btn sm${activeTab === tab ? ' is-primary' : ''}`}
               onClick={() => selectTab(tab)}
             >
-              {tab === 'ALL' ? '全部' : tab}
-              <small>{platformTabs.counts[tab]}</small>
+              {tab === 'ALL' ? '全部' : tab} {platformTabs.counts[tab]}
             </button>
           ))}
         </div>
@@ -465,52 +465,40 @@ const App = () => {
               <button key={g} type="button" className={`chip${activeGenre === g ? ' on' : ''}`} onClick={() => setActiveGenre(g)}>{g}</button>
             ))}
           </div>
-          <select value={sortOption} onChange={(e) => setSortOption(e.target.value as SortOption)} aria-label="排序方式">
-            {SORT_LABELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-        </div>
-
-        <div className="board">
-          <div className="row hd" aria-hidden="true">
-            <span className="rk">RANK</span>
-            <span className="sc">SCORE</span>
-            <span />
-            <span className="nm">NAME</span>
-            <span className="pl">SYS</span>
-            <span className="gn hs">GENRE</span>
-            <span className="hr hs">TIME</span>
-            <span className="dt hs">DATE</span>
-            <span className="ac" />
+          <div className="nes-select srt">
+            <select value={sortOption} onChange={(e) => setSortOption(e.target.value as SortOption)} aria-label="排序方式">
+              {SORT_LABELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
           </div>
-
-          {isLoading ? (
-            <div className="state">
-              <h3>LOADING...</h3>
-              <p>正在讀取你的遊戲清單</p>
-            </div>
-          ) : filteredGames.length === 0 ? (
-            <div className="state">
-              <h3>{!user ? 'PRESS START' : games.length === 0 ? 'NO DATA' : 'NO MATCH'}</h3>
-              <p>
-                {!user
-                  ? '登入後就能把遊戲評分存到雲端。'
-                  : games.length === 0
-                    ? '排行榜還是空的，投下第一枚硬幣吧。'
-                    : '沒有符合目前篩選條件的遊戲。'}
-              </p>
-              {!user && <button type="button" className="btn cy" onClick={handleLogin}>Google 登入</button>}
-              {user && games.length === 0 && <button type="button" className="btn yl" onClick={() => setIsModalOpen(true)}>＋ 新增第一款遊戲</button>}
-            </div>
-          ) : (
-            <ol>
-              {filteredGames.map((game, index) => (
-                <GameRow key={game.id} game={game} rank={index} onDelete={handleDeleteGame} onEdit={handleEditGame} />
-              ))}
-            </ol>
-          )}
         </div>
 
-        <p className="foot">© GAMERANK　CREDIT 01　v{APP_VERSION}</p>
+        {isLoading ? (
+          <div className="nes-container is-rounded state">
+            <h3>LOADING...</h3>
+            <p>正在讀取你的遊戲清單</p>
+          </div>
+        ) : filteredGames.length === 0 ? (
+          <div className="nes-container is-rounded state">
+            <h3>{!user ? 'PRESS START' : games.length === 0 ? 'NO DATA' : 'NO MATCH'}</h3>
+            <p>
+              {!user
+                ? '登入後就能把遊戲評分存到雲端。'
+                : games.length === 0
+                  ? '還沒有任何評分，新增第一款遊戲吧。'
+                  : '沒有符合目前篩選條件的遊戲。'}
+            </p>
+            {!user && <button type="button" className="nes-btn is-warning" onClick={handleLogin}>Google 登入</button>}
+            {user && games.length === 0 && <button type="button" className="nes-btn is-primary" onClick={() => setIsModalOpen(true)}>＋ 新增第一款遊戲</button>}
+          </div>
+        ) : (
+          <div className="grid">
+            {filteredGames.map(game => (
+              <GameCard key={game.id} game={game} onDelete={handleDeleteGame} onEdit={handleEditGame} />
+            ))}
+          </div>
+        )}
+
+        <p className="foot">GAMERANK v{APP_VERSION}</p>
       </main>
 
       {isModalOpen && <AddGameModal isOpen onClose={closeModal} onSave={handleSaveGame} initialData={editingGame} />}

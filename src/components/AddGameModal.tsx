@@ -246,10 +246,10 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
 
   return (
     <div className="mback" role="dialog" aria-modal="true" aria-labelledby="game-modal-title" onPaste={handlePaste}>
-      <div className="mbox">
+      <div className="nes-container is-rounded mbox">
         <div className="mhead">
           <h2 id="game-modal-title">
-            {initialData ? 'EDIT SCORE' : 'ENTER YOUR SCORE'}
+            {initialData ? 'EDIT GAME' : 'NEW GAME'}
             <small>{initialData ? '修改遊戲評分' : '新增遊戲評分'}</small>
           </h2>
           <button type="button" className="x" onClick={onClose} aria-label="關閉">×</button>
@@ -258,14 +258,14 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
         <form className="mbody" onSubmit={handleSubmit}>
           <label className="fl">
             <span>遊戲名稱</span>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：艾爾登法環" required autoFocus={!initialData} />
+            <input className="nes-input" type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：艾爾登法環" required autoFocus={!initialData} />
           </label>
 
           <div className="fl">
             <span>平台</span>
             <div className="seg">
               {PLATFORMS.map(p => (
-                <button key={p} type="button" aria-pressed={platform === p} className={`p-${p}${platform === p ? ' on' : ''}`} onClick={() => setPlatform(p)}>{p}</button>
+                <button key={p} type="button" aria-pressed={platform === p} className={`nes-btn sm${platform === p ? ' is-primary' : ''}`} onClick={() => setPlatform(p)}>{p}</button>
               ))}
             </div>
           </div>
@@ -273,18 +273,20 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
           <div className="mrow">
             <label className="fl">
               <span>分數</span>
-              <select value={score} onChange={(e) => setScore(Number(e.target.value))}>
-                {!SCORE_OPTIONS.includes(score) && <option value={score}>{score}（舊資料）</option>}
-                {SCORE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
+              <div className="nes-select">
+                <select value={score} onChange={(e) => setScore(Number(e.target.value))}>
+                  {!SCORE_OPTIONS.includes(score) && <option value={score}>{score}（舊資料）</option>}
+                  {SCORE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </div>
             </label>
             <label className="fl">
               <span>時數</span>
-              <input type="number" min="0" inputMode="numeric" value={playtime} onChange={(e) => setPlaytime(e.target.value === '' ? '' : Number(e.target.value))} placeholder="0" />
+              <input className="nes-input" type="number" min="0" inputMode="numeric" value={playtime} onChange={(e) => setPlaytime(e.target.value === '' ? '' : Number(e.target.value))} placeholder="0" />
             </label>
             <label className="fl">
               <span>評分日期</span>
-              <input type="date" value={ratingDate} onChange={(e) => setRatingDate(e.target.value)} />
+              <input className="nes-input" type="date" value={ratingDate} onChange={(e) => setRatingDate(e.target.value)} />
             </label>
           </div>
 
@@ -315,10 +317,10 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="seg">
-                  <button type="button" onClick={(e) => (e.currentTarget.nextElementSibling as HTMLInputElement).click()}>上傳</button>
+                  <button type="button" className="nes-btn sm" onClick={(e) => (e.currentTarget.nextElementSibling as HTMLInputElement).click()}>上傳</button>
                   <input type="file" accept="image/*" onChange={handleImageUpload} hidden />
-                  <button type="button" onClick={handlePasteClick}>貼上</button>
-                  <button type="button" className="on" onClick={openSearch}>線上搜尋</button>
+                  <button type="button" className="nes-btn sm" onClick={handlePasteClick}>貼上</button>
+                  <button type="button" className="nes-btn is-warning sm" onClick={openSearch}>線上搜尋</button>
                 </div>
                 <p className="hint">可上傳、貼上（Ctrl+V）或線上搜尋封面。</p>
               </div>
@@ -330,14 +332,14 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
               <span>評語</span>
               <button type="button" className="link" onClick={() => setIsTagSelectorOpen(true)}>選擇形容標籤</button>
             </div>
-            <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={3} placeholder="玩完覺得如何？" required />
+            <textarea className="nes-textarea" value={comment} onChange={(e) => setComment(e.target.value)} rows={3} placeholder="玩完覺得如何？" required />
           </div>
 
-          {notice && <p className="hint" role="alert" style={{ color: 'var(--yel)', margin: 0 }}>{notice}</p>}
+          {notice && <p className="hint" role="alert" style={{ color: 'var(--err)', margin: 0 }}>{notice}</p>}
 
           <div className="mfoot">
-            <button type="button" className="btn" onClick={onClose}>取消</button>
-            <button type="submit" className="btn go" disabled={subOpen}>{initialData ? '更新評分' : '存入排行榜'}</button>
+            <button type="button" className="nes-btn" onClick={onClose}>取消</button>
+            <button type="submit" className="nes-btn is-success" disabled={subOpen}>{initialData ? '更新評分' : '存入排行榜'}</button>
           </div>
         </form>
 
@@ -362,8 +364,8 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
             <div className="sheet-foot">
               <span>已選 {selectedTags.length}/{MAX_TAGS}</span>
               <span className="mfoot">
-                {selectedTags.length > 0 && <button type="button" className="btn" onClick={() => setSelectedTags([])}>清除</button>}
-                <button type="button" className="btn go" onClick={insertTags} disabled={selectedTags.length === 0}>插入</button>
+                {selectedTags.length > 0 && <button type="button" className="nes-btn" onClick={() => setSelectedTags([])}>清除</button>}
+                <button type="button" className="nes-btn is-success" onClick={insertTags} disabled={selectedTags.length === 0}>插入</button>
               </span>
             </div>
           </div>
@@ -377,8 +379,8 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
             </div>
             <div className="mbody">
               <form className="searchbar" onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); void runSearch(searchQuery); }}>
-                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="遊戲名稱" aria-label="搜尋遊戲名稱" autoFocus={!searchQuery} />
-                <button type="submit" className="btn cy" disabled={isSearching || !searchQuery}>{isSearching ? <span className="spin" /> : '搜尋'}</button>
+                <input className="nes-input" type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="遊戲名稱" aria-label="搜尋遊戲名稱" autoFocus={!searchQuery} />
+                <button type="submit" className="nes-btn is-primary" disabled={isSearching || !searchQuery}>{isSearching ? <span className="spin" /> : '搜尋'}</button>
               </form>
 
               {searchResults.length > 0 && !isSearching && (

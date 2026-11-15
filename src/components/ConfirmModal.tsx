@@ -14,7 +14,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ isOpen, onClose, onC
 
   return (
     <div className="mback top-most" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-      <div className="mbox sm">
+      <div className="nes-container is-rounded mbox sm">
         <div className="mhead">
           <h2 id="confirm-title">{title}</h2>
         </div>
@@ -22,11 +22,11 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ isOpen, onClose, onC
           <p className="msg">{message}</p>
           <div className="mfoot">
             {!isAlert && (
-              <button type="button" className="btn" onClick={onClose}>取消</button>
+              <button type="button" className="nes-btn" onClick={onClose}>取消</button>
             )}
             <button
               type="button"
-              className="btn go"
+              className="nes-btn is-primary"
               autoFocus
               onClick={() => {
                 // 先關再執行：onConfirm 可能會開啟下一個對話框
