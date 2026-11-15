@@ -1,29 +1,53 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Platform, Game, GENRE_OPTIONS } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Platform, Game, GameInput, GENRE_OPTIONS } from '../types';
 import { getGameGenre } from '../services/geminiService';
 import { searchUnifiedGames, UnifiedGame } from '../services/igdbService';
-import { X, Loader2, Save, Upload, Image as ImageIcon, ChevronDown, Tags, Check, RotateCcw, Clipboard, Globe, Search, Sparkles } from 'lucide-react';
 
 interface AddGameModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (title: string, platform: Platform, score: number, comment: string, genre: string, ratingDate: string, imageUrl: string, playtime: number) => void;
+  onSave: (game: GameInput) => void;
   initialData?: Game | null;
 }
 
-// Generate scores from 10 down to 1 in 0.5 steps
-const SCORE_OPTIONS = Array.from({ length: 19 }, (_, i) => {
-  const val = 10 - i * 0.5;
-  return val % 1 === 0 ? val.toString() : val.toFixed(1);
-});
+// 10 → 1，每 0.5 一級
+const SCORE_OPTIONS = Array.from({ length: 19 }, (_, i) => 10 - i * 0.5);
+const PLATFORMS = [Platform.PS, Platform.XBOX, Platform.SWITCH, Platform.PC];
+const MAX_TAGS = 5;
+const MAX_COVER_SIZE = 400; // 封面最長邊，控制儲存大小
+
+type SearchSource = 'ALL' | UnifiedGame['source'];
+
+// 用本地時區的今天（toISOString 是 UTC，台灣早上 8 點前會變成昨天）
+const todayLocal = () => {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const toCoverDataUrl = (img: HTMLImageElement): string => {
+  const scale = Math.min(1, MAX_COVER_SIZE / Math.max(img.width, img.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.8);
+};
+
+const loadImage = (src: string, crossOrigin = false) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    if (crossOrigin) img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('image load failed'));
+    img.src = src;
+  });
 
 // Tag Categories Definition
 const TAG_CATEGORIES = [
   {
     id: 'positive',
-    label: '✅ 正面評價 (推坑)',
-    colorClass: 'bg-emerald-900/40 text-emerald-200 border-emerald-700 hover:bg-emerald-800/60',
-    selectedClass: 'bg-emerald-600 text-white border-emerald-500',
+    label: '正面評價（推坑）',
     tags: [
       '#畫面精美', '#劇情神作', '#美術風格獨特', '#打擊感爽', '#地圖設計精妙',
       '#音樂神曲', '#沉浸感絕佳', '#角色刻畫生動', '#創意十足', '#優化良好'
@@ -31,9 +55,7 @@ const TAG_CATEGORIES = [
   },
   {
     id: 'negative',
-    label: '❌ 負面評價 (勸退)',
-    colorClass: 'bg-red-900/40 text-red-200 border-red-700 hover:bg-red-800/60',
-    selectedClass: 'bg-red-600 text-white border-red-500',
+    label: '負面評價（勸退）',
     tags: [
       '#優化極差', '#BUG多', '#作業感重', '#操作手感差', '#流程太短',
       '#劇情爛尾', '#視角鏡頭爛', '#新手引導差', '#翻譯品質差'
@@ -41,9 +63,7 @@ const TAG_CATEGORIES = [
   },
   {
     id: 'neutral',
-    label: '⚖️ 風格與節奏 (中性)',
-    colorClass: 'bg-indigo-900/40 text-indigo-200 border-indigo-700 hover:bg-indigo-800/60',
-    selectedClass: 'bg-indigo-600 text-white border-indigo-500',
+    label: '風格與節奏（中性）',
     tags: [
       '#硬派高難', '#休閒療癒', '#極度燒腦', '#節奏慢熱', '#恐怖壓抑', '#重視探索',
       '#電影式敘事', '#多重結局', '#自由度高', '#一本道流程', '#文字量大', '#懷舊復古'
@@ -52,102 +72,40 @@ const TAG_CATEGORIES = [
 ];
 
 export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onSave, initialData }) => {
-  const [title, setTitle] = useState('');
-  const [platform, setPlatform] = useState<Platform>(Platform.PS);
-  const [score, setScore] = useState<number>(8); // Default score is 8
-  const [comment, setComment] = useState('');
-  
-  // Changed from single string to string array
-  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
-  
-  const [ratingDate, setRatingDate] = useState(new Date().toISOString().split('T')[0]);
-  const [playtime, setPlaytime] = useState<number | ''>('');
-  const [imageUrl, setImageUrl] = useState('');
-  
+  // 視窗每次開啟都是重新掛載（見 App.tsx），所以初始值直接取自 initialData
+  const [title, setTitle] = useState(initialData?.title ?? '');
+  const [platform, setPlatform] = useState<Platform>(initialData?.platform ?? Platform.PS);
+  const [score, setScore] = useState<number>(initialData?.score ?? 8);
+  const [comment, setComment] = useState(initialData?.comment ?? '');
+  const [selectedGenres, setSelectedGenres] = useState<string[]>(() => (initialData?.genre ? initialData.genre.split(', ').filter(Boolean) : []));
+  const [ratingDate, setRatingDate] = useState(() => initialData?.ratingDate || todayLocal());
+  const [playtime, setPlaytime] = useState<number | ''>(initialData?.playtime || '');
+  const [imageUrl, setImageUrl] = useState(initialData?.imageUrl ?? '');
+  const [notice, setNotice] = useState('');
+
   const [isGettingInfo, setIsGettingInfo] = useState(false);
 
-  // Custom Score Select State
-  const [isScoreOpen, setIsScoreOpen] = useState(false);
-  const scoreRef = useRef<HTMLDivElement>(null);
-
-  // Custom Genre Select State
-  const [isGenreOpen, setIsGenreOpen] = useState(false);
-  const genreRef = useRef<HTMLDivElement>(null);
-
-  // Tag Selector State
   const [isTagSelectorOpen, setIsTagSelectorOpen] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const tagSelectorRef = useRef<HTMLDivElement>(null);
-  const popupRef = useRef<HTMLDivElement>(null);
 
-  // Search State
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UnifiedGame[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [activeSearchFilter, setActiveSearchFilter] = useState<'ALL' | 'STEAM' | 'IGDB' | 'GOOGLE'>('ALL');
+  const [searchFilter, setSearchFilter] = useState<SearchSource>('ALL');
 
+  // Esc：先關子畫面，再關視窗
   useEffect(() => {
-    if (isOpen) {
-      if (initialData) {
-        setTitle(initialData.title);
-        setPlatform(initialData.platform);
-        setScore(initialData.score);
-        setComment(initialData.comment);
-        
-        // Split comma-separated string back to array
-        if (initialData.genre) {
-            setSelectedGenres(initialData.genre.split(', ').filter(Boolean));
-        } else {
-            setSelectedGenres([]);
-        }
-        
-        setRatingDate(initialData.ratingDate);
-        setPlaytime(initialData.playtime || '');
-        setImageUrl(initialData.imageUrl || '');
-      } else {
-        // Reset form
-        setTitle('');
-        setScore(8); // Default to 8
-        setComment('');
-        setSelectedGenres([]);
-        setRatingDate(new Date().toISOString().split('T')[0]);
-        setPlaytime('');
-        setImageUrl('');
-        setPlatform(Platform.PS);
-      }
-      setSelectedTags([]); // Reset tags on open
-      setIsTagSelectorOpen(false);
-      setIsSearchOpen(false);
-      setSearchResults([]);
-      setActiveSearchFilter('ALL');
-    }
-  }, [isOpen, initialData]);
-
-  // Click outside listener for custom select and tag selector
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (scoreRef.current && !scoreRef.current.contains(event.target as Node)) {
-        setIsScoreOpen(false);
-      }
-
-      if (genreRef.current && !genreRef.current.contains(event.target as Node)) {
-        setIsGenreOpen(false);
-      }
-      
-      // Check if click is outside BOTH the trigger area and the popup content
-      const isOutsideTrigger = tagSelectorRef.current && !tagSelectorRef.current.contains(event.target as Node);
-      const isOutsidePopup = popupRef.current && !popupRef.current.contains(event.target as Node);
-
-      if (isOutsideTrigger && isOutsidePopup) {
-        setIsTagSelectorOpen(false);
-      }
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (isTagSelectorOpen) setIsTagSelectorOpen(false);
+      else if (isSearchOpen) setIsSearchOpen(false);
+      else onClose();
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [isOpen, isTagSelectorOpen, isSearchOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -156,733 +114,300 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
     setIsGettingInfo(true);
     const fetchedGenre = await getGameGenre(title);
     if (fetchedGenre) {
-      // Try to match the fetched genre to our list
-      const matched = GENRE_OPTIONS.find(g => g === fetchedGenre) || fetchedGenre;
-      // Auto fetch sets it as the single genre (or you could append it)
-      setSelectedGenres([matched]);
+      const matched = GENRE_OPTIONS.find(g => g === fetchedGenre);
+      if (matched) setSelectedGenres([matched]);
+      else setNotice(`AI 回傳的類型「${fetchedGenre}」不在清單裡，請手動選擇。`);
+    } else {
+      setNotice('AI 自動判斷目前無法使用，請手動選擇類型。');
     }
     setIsGettingInfo(false);
   };
 
-  const handleGenreToggle = (genre: string) => {
-    setSelectedGenres(prev => {
-        if (prev.includes(genre)) {
-            return prev.filter(g => g !== genre);
-        } else {
-            return [...prev, genre];
-        }
-    });
+  const toggleGenre = (genre: string) => {
+    setSelectedGenres(prev => (prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]));
   };
 
-  const handleTagToggle = (tag: string) => {
+  const toggleTag = (tag: string) => {
     setSelectedTags(prev => {
-      if (prev.includes(tag)) {
-        return prev.filter(t => t !== tag);
-      } else {
-        if (prev.length >= 5) return prev; // Max 5 limit
-        return [...prev, tag];
-      }
+      if (prev.includes(tag)) return prev.filter(t => t !== tag);
+      if (prev.length >= MAX_TAGS) return prev;
+      return [...prev, tag];
     });
   };
 
-  const handleResetTags = () => {
-    setSelectedTags([]);
-  };
-
-  const handleInsertTags = () => {
-    if (selectedTags.length === 0) {
-      setIsTagSelectorOpen(false);
-      return;
+  const insertTags = () => {
+    if (selectedTags.length > 0) {
+      setComment(selectedTags.join(' ')); // 取代目前評語（沿用原本行為）
+      setSelectedTags([]);
     }
-    const tagsString = selectedTags.join(' ');
-    setComment(tagsString); // Replaces current comment
-    setSelectedTags([]);
     setIsTagSelectorOpen(false);
   };
 
-  const processFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-        const MAX_SIZE = 400; // Resize to max 400px to save storage
-
-        if (width > height) {
-          if (width > MAX_SIZE) {
-            height *= MAX_SIZE / width;
-            width = MAX_SIZE;
-          }
-        } else {
-          if (height > MAX_SIZE) {
-            width *= MAX_SIZE / height;
-            height = MAX_SIZE;
-          }
-        }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        setImageUrl(canvas.toDataURL('image/jpeg', 0.8)); // Compress quality
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+  const useImageFile = (file: Blob) => {
+    const objectUrl = URL.createObjectURL(file);
+    loadImage(objectUrl)
+      .then(img => { setImageUrl(toCoverDataUrl(img)); setNotice(''); })
+      .catch(() => setNotice('這張圖片讀不出來，請換一張。'))
+      .finally(() => URL.revokeObjectURL(objectUrl));
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      processFile(file);
-    }
+    if (file) useImageFile(file);
+    e.target.value = '';
   };
 
   const handlePasteClick = async () => {
     try {
-      if (!navigator.clipboard || !navigator.clipboard.read) {
-         throw new Error("Clipboard API not fully supported");
-      }
-
-      // @ts-ignore
+      if (!navigator.clipboard?.read) throw new Error('Clipboard API not supported');
       const clipboardItems = await navigator.clipboard.read();
-      
       for (const item of clipboardItems) {
-        const imageType = item.types.find((type: string) => type.startsWith('image/'));
+        const imageType = item.types.find(type => type.startsWith('image/'));
         if (imageType) {
-          const blob = await item.getType(imageType);
-          const file = new File([blob], "pasted-image.png", { type: blob.type });
-          processFile(file);
+          useImageFile(await item.getType(imageType));
           return;
         }
       }
-      
-      alert("No image found in clipboard. Please copy an image first.");
-    } catch (err: any) {
-      console.error("Clipboard Error:", err);
-      // Specific handling for Permission/Policy errors
-      if (err.name === 'NotAllowedError' || err.message?.includes('blocked') || err.message?.includes('permission')) {
-          alert("⚠️ Browser blocked direct access.\n\nDon't worry! You can still paste:\n👉 Click anywhere on the form and press Ctrl+V (or Cmd+V).");
-      } else {
-          alert("Could not paste via button.\n\nPlease try pressing Ctrl+V (or Cmd+V) instead.");
-      }
+      setNotice('剪貼簿裡沒有圖片，請先複製一張圖。');
+    } catch (err) {
+      console.error('Clipboard Error:', err);
+      setNotice('瀏覽器不允許按鈕直接讀取剪貼簿，請點一下表單後按 Ctrl+V（Mac 為 Cmd+V）貼上。');
     }
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData.items;
     for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
+      if (items[i].type.startsWith('image/')) {
         const file = items[i].getAsFile();
         if (file) {
-          e.preventDefault(); // Prevent pasting into inputs if it's an image
-          processFile(file);
-          return; // Only process the first image found
+          e.preventDefault();
+          useImageFile(file);
+          return;
         }
       }
     }
   };
 
-  // Search Logic
-  const openSearchModal = () => {
-    const trimmedTitle = title.trim();
-    setSearchQuery(trimmedTitle);
-    setSearchResults([]);
-    setActiveSearchFilter('ALL');
-    setIsSearchOpen(true);
-    if (trimmedTitle) {
-        handleSearchSubmit(trimmedTitle);
-    }
-  };
-
-  const handleSearchSubmit = async (queryStr: string) => {
+  const runSearch = async (queryStr: string) => {
     if (!queryStr) return;
     setIsSearching(true);
     setSearchResults([]);
-    setActiveSearchFilter('ALL');
+    setSearchFilter('ALL');
     const results = await searchUnifiedGames(queryStr);
     setSearchResults(results);
     setIsSearching(false);
   };
 
-  const handleSelectImage = async (url: string) => {
+  const openSearch = () => {
+    const trimmedTitle = title.trim();
+    setSearchQuery(trimmedTitle);
+    setSearchResults([]);
+    setSearchFilter('ALL');
+    setIsSearchOpen(true);
+    if (trimmedTitle) void runSearch(trimmedTitle);
+  };
+
+  const selectSearchImage = async (url: string) => {
     setIsSearching(true);
     try {
-        // Use img element to load and render the image to avoid CORS issues
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            ctx?.drawImage(img, 0, 0);
-            
-            // Convert canvas to blob and process
-            canvas.toBlob((blob) => {
-                if (blob) {
-                    const file = new File([blob], "cover_image.jpg", { type: 'image/jpeg' });
-                    processFile(file);
-                }
-                setIsSearchOpen(false);
-                setIsSearching(false);
-            }, 'image/jpeg', 0.8);
-        };
-        
-        img.onerror = () => {
-            console.error("Failed to load image", url);
-            alert("Failed to load image. Please try another one.");
-            setIsSearching(false);
-        };
-        
-        img.src = url;
+      // 直接縮圖一次就好（以往會先整張轉檔再縮一次）
+      const img = await loadImage(url, true);
+      setImageUrl(toCoverDataUrl(img));
+      setNotice('');
+      setIsSearchOpen(false);
     } catch (error) {
-        console.error("Failed to select image", error);
-        alert("Failed to process image. Please try another one.");
-        setIsSearching(false);
+      console.error('Failed to use searched image', url, error);
+      setNotice('這張圖片的來源不允許下載，請換一張，或另存後用「上傳」。');
+      setIsSearchOpen(false);
+    } finally {
+      setIsSearching(false);
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !comment) return;
-    
-    // Join genres into a single string for storage
-    const genreString = selectedGenres.join(', ');
-    
-    onSave(title, platform, score, comment, genreString, ratingDate, imageUrl, Number(playtime) || 0);
+    if (!title.trim() || !comment.trim()) return;
+    onSave({
+      title: title.trim(),
+      platform,
+      score,
+      comment,
+      genre: selectedGenres.join(', '),
+      ratingDate,
+      imageUrl,
+      playtime: Number(playtime) || 0,
+    });
   };
 
-  const getScoreColorClass = (val: number) => {
-    const normalized = val > 10 ? val / 10 : val;
-    if (normalized >= 9.0) return 'text-emerald-400';
-    if (normalized >= 7.5) return 'text-blue-400';
-    if (normalized >= 6.0) return 'text-yellow-400';
-    return 'text-red-400';
-  };
-
-  // Filter Search Results logic
-  const getFilteredResults = () => {
-    if (activeSearchFilter === 'ALL') return searchResults;
-    return searchResults.filter(r => r.source === activeSearchFilter);
-  };
-  
-  const getSourceCount = (source: 'STEAM' | 'IGDB' | 'GOOGLE') => {
-      return searchResults.filter(r => r.source === source).length;
-  };
+  const sourceCount = (source: UnifiedGame['source']) => searchResults.filter(r => r.source === source).length;
+  const visibleResults = (searchFilter === 'ALL' ? searchResults : searchResults.filter(r => r.source === searchFilter)).filter(r => r.coverUrl);
+  const subOpen = isTagSelectorOpen || isSearchOpen;
 
   return (
-    <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-      onPaste={handlePaste} // Add paste listener to the modal container
-    >
-      <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh] relative">
-        
-        <div className="flex justify-between items-center p-5 border-b border-slate-800 bg-slate-800/50">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            {initialData ? 'Edit Game' : 'Add New Game'}
+    <div className="mback" role="dialog" aria-modal="true" aria-labelledby="game-modal-title" onPaste={handlePaste}>
+      <div className="mbox">
+        <div className="mhead">
+          <h2 id="game-modal-title">
+            {initialData ? 'EDIT SCORE' : 'ENTER YOUR SCORE'}
+            <small>{initialData ? '修改遊戲評分' : '新增遊戲評分'}</small>
           </h2>
-          {!isTagSelectorOpen && !isSearchOpen && (
-            <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-          )}
+          <button type="button" className="x" onClick={onClose} aria-label="關閉">×</button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto custom-scrollbar">
-          {/* Title Input */}
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-400">Game Title</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Elden Ring"
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
-              required
-            />
-          </div>
+        <form className="mbody" onSubmit={handleSubmit}>
+          <label className="fl">
+            <span>遊戲名稱</span>
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：艾爾登法環" required autoFocus={!initialData} />
+          </label>
 
-          {/* Platform Select */}
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-400">Platform</label>
-            <div className="grid grid-cols-4 gap-2">
-              {[Platform.PS, Platform.XBOX, Platform.SWITCH, Platform.PC].map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPlatform(p)}
-                  className={`px-1 py-2 rounded-lg text-xs sm:text-sm font-bold border transition-all truncate ${
-                    platform === p
-                      ? p === Platform.PS 
-                        ? 'bg-blue-600 border-blue-500 text-white' 
-                        : p === Platform.XBOX
-                          ? 'bg-[#107C10] border-green-600 text-white'
-                          : p === Platform.SWITCH 
-                            ? 'bg-red-600 border-red-500 text-white'
-                            : 'bg-slate-700 border-slate-600 text-white'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600'
-                  }`}
-                >
-                  {p}
-                </button>
+          <div className="fl">
+            <span>平台</span>
+            <div className="seg">
+              {PLATFORMS.map(p => (
+                <button key={p} type="button" aria-pressed={platform === p} className={`p-${p}${platform === p ? ' on' : ''}`} onClick={() => setPlatform(p)}>{p}</button>
               ))}
             </div>
           </div>
 
-          {/* Score, Playtime, Date */}
-          <div className="flex gap-2 sm:gap-3">
-            {/* Custom Score Select */}
-            <div className="w-[4.5rem] sm:w-24 space-y-1 shrink-0" ref={scoreRef}>
-              <label className="text-xs sm:text-sm font-medium text-slate-400 block truncate text-center">Score</label>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsScoreOpen(!isScoreOpen)}
-                  className={`w-full h-11 bg-slate-950 border border-slate-700 rounded-lg px-2 flex items-center justify-between focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all ${isScoreOpen ? 'border-blue-500 ring-1 ring-blue-500' : ''}`}
-                >
-                  <span className={`flex-1 text-center font-bold text-lg ${getScoreColorClass(score)}`}>
-                    {score}
-                  </span>
-                  <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform ${isScoreOpen ? 'rotate-180' : ''}`} />
-                </button>
-                
-                {isScoreOpen && (
-                  <div className="absolute top-full left-0 w-full mt-1 max-h-48 overflow-y-auto bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 custom-scrollbar">
-                     {!SCORE_OPTIONS.includes(score.toString()) && score > 10 && (
-                        <button
-                          type="button"
-                          className="w-full text-center px-2 py-2 text-sm text-slate-300 border-b border-slate-800 bg-slate-800"
-                        >
-                          {score} (Legacy)
-                        </button>
-                     )}
-                    {SCORE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => {
-                          setScore(Number(opt));
-                          setIsScoreOpen(false);
-                        }}
-                        className={`w-full text-center px-2 py-2 text-sm font-medium transition-colors hover:bg-slate-800 ${
-                          Number(opt) === score ? 'bg-slate-800 text-white' : 'text-slate-400'
-                        }`}
-                      >
-                         <span className={getScoreColorClass(Number(opt))}>{opt}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+          <div className="mrow">
+            <label className="fl">
+              <span>分數</span>
+              <select value={score} onChange={(e) => setScore(Number(e.target.value))}>
+                {!SCORE_OPTIONS.includes(score) && <option value={score}>{score}（舊資料）</option>}
+                {SCORE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+            </label>
+            <label className="fl">
+              <span>時數</span>
+              <input type="number" min="0" inputMode="numeric" value={playtime} onChange={(e) => setPlaytime(e.target.value === '' ? '' : Number(e.target.value))} placeholder="0" />
+            </label>
+            <label className="fl">
+              <span>評分日期</span>
+              <input type="date" value={ratingDate} onChange={(e) => setRatingDate(e.target.value)} />
+            </label>
+          </div>
+
+          <div className="fl">
+            <div className="flh">
+              <span>類型（可複選）</span>
+              <button type="button" className="link" onClick={handleGetInfo} disabled={!title || isGettingInfo}>
+                {isGettingInfo ? <><span className="spin" /> 判斷中</> : 'AI 自動判斷'}
+              </button>
+            </div>
+            <div className="chips">
+              {GENRE_OPTIONS.map(g => (
+                <button key={g} type="button" aria-pressed={selectedGenres.includes(g)} className={`chip${selectedGenres.includes(g) ? ' on' : ''}`} onClick={() => toggleGenre(g)}>{g}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="fl">
+            <span>封面</span>
+            <div className="coverrow">
+              <div className="thumb">
+                {imageUrl ? (
+                  <>
+                    <img src={imageUrl} alt="封面預覽" />
+                    <button type="button" className="x" onClick={() => setImageUrl('')} aria-label="移除封面">×</button>
+                  </>
+                ) : '無封面'}
               </div>
-            </div>
-
-            <div className="w-[4.5rem] sm:w-24 space-y-1 shrink-0">
-              <label className="text-xs sm:text-sm font-medium text-slate-400 block truncate text-center">Hrs</label>
-               <input
-                type="number"
-                min="0"
-                value={playtime}
-                onChange={(e) => setPlaytime(e.target.value === '' ? '' : Number(e.target.value))}
-                placeholder="0"
-                className="w-full h-11 bg-slate-950 border border-slate-700 rounded-lg px-2 sm:px-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-center placeholder-slate-700 text-sm"
-              />
-            </div>
-            <div className="flex-1 space-y-1 min-w-0">
-              <label className="text-xs sm:text-sm font-medium text-slate-400 block truncate text-center">Date</label>
-              <input
-                type="date"
-                value={ratingDate}
-                onChange={(e) => setRatingDate(e.target.value)}
-                onClick={(e) => {
-                  // Explicitly show picker on click for better UX
-                  try {
-                    if (typeof (e.target as any).showPicker === 'function') {
-                      (e.target as any).showPicker();
-                    }
-                  } catch (error) {
-                    // Ignore errors if browser doesn't support or blocks it
-                  }
-                }}
-                className="w-full h-11 bg-slate-950 border border-slate-700 rounded-lg px-2 sm:px-3 text-white focus:outline-none focus:border-blue-500 text-sm cursor-pointer"
-              />
-            </div>
-          </div>
-          
-           {/* Genre Select (Multi) & Auto Button */}
-           <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-400">Genre</label>
-            <div className="flex gap-2">
-                <div className="relative flex-1" ref={genreRef}>
-                  <button
-                    type="button"
-                    onClick={() => setIsGenreOpen(!isGenreOpen)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-left flex items-center justify-between focus:outline-none focus:border-blue-500 min-h-[38px]"
-                  >
-                    <span className={`text-sm block truncate ${selectedGenres.length === 0 ? 'text-slate-500' : 'text-white'}`}>
-                      {selectedGenres.length === 0 ? 'Select Genre' : selectedGenres.join(', ')}
-                    </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${isGenreOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {isGenreOpen && (
-                    <div className="absolute top-full left-0 w-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 max-h-56 overflow-y-auto custom-scrollbar">
-                        {GENRE_OPTIONS.map((g) => {
-                            const isSelected = selectedGenres.includes(g);
-                            return (
-                                <button
-                                    key={g}
-                                    type="button"
-                                    onClick={() => handleGenreToggle(g)}
-                                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-800 flex items-center justify-between group"
-                                >
-                                    <span className={isSelected ? 'text-white font-medium' : 'text-slate-400 group-hover:text-slate-200'}>
-                                        {g}
-                                    </span>
-                                    {isSelected && <Check className="w-4 h-4 text-blue-500" />}
-                                </button>
-                            );
-                        })}
-                    </div>
-                  )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="seg">
+                  <button type="button" onClick={(e) => (e.currentTarget.nextElementSibling as HTMLInputElement).click()}>上傳</button>
+                  <input type="file" accept="image/*" onChange={handleImageUpload} hidden />
+                  <button type="button" onClick={handlePasteClick}>貼上</button>
+                  <button type="button" className="on" onClick={openSearch}>線上搜尋</button>
                 </div>
-
-                <button
-                    type="button"
-                    onClick={handleGetInfo}
-                    disabled={!title || isGettingInfo}
-                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-lg flex items-center gap-2 transition-colors text-sm font-medium whitespace-nowrap"
-                    title="Auto Fetch Genre"
-                >
-                    {isGettingInfo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                    Auto
-                </button>
-            </div>
-          </div>
-
-          {/* Cover Image Upload */}
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-400">Game Cover</label>
-            <div className="flex items-start gap-4">
-              {imageUrl ? (
-                <div className="relative group shrink-0">
-                  <img src={imageUrl} alt="Cover Preview" className="w-20 h-28 object-cover rounded-lg border border-slate-700 bg-slate-950" />
-                  <button
-                    type="button"
-                    onClick={() => setImageUrl('')}
-                    className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                    title="Remove Image"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ) : (
-                <div className="w-20 h-28 shrink-0 bg-slate-950 border border-slate-700 border-dashed rounded-lg flex flex-col items-center justify-center text-slate-500 gap-1">
-                  <ImageIcon className="w-6 h-6 opacity-50" />
-                  <span className="text-[10px]">No Image</span>
-                </div>
-              )}
-              
-              <div className="flex-1">
-                <div className="grid grid-cols-3 gap-2">
-                    <label className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 cursor-pointer bg-slate-800 hover:bg-slate-700 text-white px-2 py-2 rounded-lg border border-slate-700 transition-colors h-full">
-                      <Upload className="w-4 h-4" />
-                      <span className="text-[10px] sm:text-sm font-medium">Upload</span>
-                      <input 
-                        type="file" 
-                        accept="image/*" 
-                        onChange={handleImageUpload} 
-                        className="hidden" 
-                      />
-                    </label>
-                    <button
-                        type="button"
-                        onClick={handlePasteClick}
-                        className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 bg-slate-800 hover:bg-slate-700 text-white px-2 py-2 rounded-lg border border-slate-700 transition-colors h-full"
-                        title="Paste from Clipboard"
-                    >
-                        <Clipboard className="w-4 h-4" />
-                        <span className="text-[10px] sm:text-sm font-medium">Paste</span>
-                    </button>
-                    <button
-                        type="button"
-                        onClick={openSearchModal}
-                        className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 bg-indigo-700 hover:bg-indigo-600 text-white px-2 py-2 rounded-lg border border-indigo-500 transition-colors h-full"
-                        title="Search Cover"
-                    >
-                        <Globe className="w-4 h-4" />
-                        <span className="text-[10px] sm:text-sm font-medium">Search</span>
-                    </button>
-                </div>
-                <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
-                  Upload, Paste (Ctrl+V), or Search online.
-                </p>
+                <p className="hint">可上傳、貼上（Ctrl+V）或線上搜尋封面。</p>
               </div>
             </div>
           </div>
 
-          {/* Comment */}
-          <div className="space-y-1 relative" ref={tagSelectorRef}>
-            <div className="flex justify-between items-center">
-              <label className="text-sm font-medium text-slate-400">Review / Comment</label>
-              <button
-                type="button"
-                onClick={() => setIsTagSelectorOpen(!isTagSelectorOpen)}
-                className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
-              >
-                <Tags className="w-3 h-3" />
-                Select Adjectives
-              </button>
+          <div className="fl">
+            <div className="flh">
+              <span>評語</span>
+              <button type="button" className="link" onClick={() => setIsTagSelectorOpen(true)}>選擇形容標籤</button>
             </div>
-            
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              rows={3}
-              disabled={isTagSelectorOpen || isSearchOpen}
-              className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 resize-none text-sm transition-opacity ${isTagSelectorOpen || isSearchOpen ? 'opacity-50 cursor-not-allowed' : ''}`}
-              placeholder="What did you think?"
-              required
-            />
+            <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={3} placeholder="玩完覺得如何？" required />
           </div>
 
-          {!isTagSelectorOpen && !isSearchOpen && (
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={isTagSelectorOpen || isSearchOpen}
-                className={`w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${isTagSelectorOpen || isSearchOpen ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <Save className="w-5 h-5" />
-                {initialData ? 'Update Rating' : 'Save Rating'}
-              </button>
-            </div>
-          )}
+          {notice && <p className="hint" role="alert" style={{ color: 'var(--yel)', margin: 0 }}>{notice}</p>}
 
+          <div className="mfoot">
+            <button type="button" className="btn" onClick={onClose}>取消</button>
+            <button type="submit" className="btn go" disabled={subOpen}>{initialData ? '更新評分' : '存入排行榜'}</button>
+          </div>
         </form>
 
-        {/* Tag Popup */}
         {isTagSelectorOpen && (
-          <div 
-            ref={popupRef}
-            className="absolute top-[69px] left-0 right-0 bottom-[10%] z-50 bg-slate-900 flex flex-col shadow-2xl border-b border-slate-700 rounded-b-2xl"
-          >
-            <div className="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-800/95 backdrop-blur z-10">
-              <span className="text-sm font-bold text-white">Select Tags (Max 5)</span>
-              <button 
-                type="button"
-                onClick={() => setIsTagSelectorOpen(false)}
-                className="text-slate-400 hover:text-white p-1"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          <div className="sheet">
+            <div className="mhead">
+              <h2>SELECT TAGS<small>最多選 {MAX_TAGS} 個，插入後會取代目前評語</small></h2>
+              <button type="button" className="x" onClick={() => setIsTagSelectorOpen(false)} aria-label="關閉標籤選擇">×</button>
             </div>
-            
-            <div className="overflow-y-auto p-3 space-y-4 custom-scrollbar flex-1">
-              {TAG_CATEGORIES.map((category) => (
-                <div key={category.id}>
-                  <h4 className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">{category.label}</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {category.tags.map((tag) => {
-                      const isSelected = selectedTags.includes(tag);
-                      return (
-                        <button
-                          key={tag}
-                          type="button"
-                          onClick={() => handleTagToggle(tag)}
-                          className={`text-[10px] sm:text-xs px-2 py-1 rounded border transition-all ${
-                            isSelected 
-                              ? category.selectedClass 
-                              : category.colorClass
-                          }`}
-                        >
-                          {tag}
-                        </button>
-                      );
-                    })}
+            <div className="mbody">
+              {TAG_CATEGORIES.map(category => (
+                <div key={category.id} className={`tagcat tk-${category.id}`}>
+                  <h4>{category.label}</h4>
+                  <div className="tags">
+                    {category.tags.map(tag => (
+                      <button key={tag} type="button" aria-pressed={selectedTags.includes(tag)} className={`tag${selectedTags.includes(tag) ? ' on' : ''}`} onClick={() => toggleTag(tag)}>{tag}</button>
+                    ))}
                   </div>
                 </div>
               ))}
             </div>
-
-            <div className="p-3 border-t border-slate-800 bg-slate-900/95 backdrop-blur flex justify-between items-center z-10 rounded-b-2xl">
-                <div className="flex items-center gap-3">
-                    <span className="text-xs text-slate-400">
-                      Selected: <span className={selectedTags.length >= 5 ? 'text-red-400' : 'text-white'}>{selectedTags.length}</span>/5
-                    </span>
-                    {selectedTags.length > 0 && (
-                        <button 
-                            type="button" 
-                            onClick={handleResetTags}
-                            className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-white bg-slate-800 px-2 py-1 rounded transition-colors"
-                        >
-                            <RotateCcw className="w-3 h-3" />
-                            Reset
-                        </button>
-                    )}
-                </div>
-                <button 
-                  type="button"
-                  onClick={handleInsertTags}
-                  disabled={selectedTags.length === 0}
-                  className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1 font-bold"
-                >
-                  <Check className="w-3 h-3" />
-                  Insert
-                </button>
+            <div className="sheet-foot">
+              <span>已選 {selectedTags.length}/{MAX_TAGS}</span>
+              <span className="mfoot">
+                {selectedTags.length > 0 && <button type="button" className="btn" onClick={() => setSelectedTags([])}>清除</button>}
+                <button type="button" className="btn go" onClick={insertTags} disabled={selectedTags.length === 0}>插入</button>
+              </span>
             </div>
           </div>
         )}
 
-        {/* Unified Search Overlay */}
         {isSearchOpen && (
-           <div className="absolute inset-0 z-50 bg-slate-900 flex flex-col">
-              <div className="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-800/95 backdrop-blur">
-                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                   <Globe className="w-4 h-4 text-indigo-400" />
-                   Search Cover
-                 </h3>
-                 <button 
-                   type="button"
-                   onClick={() => setIsSearchOpen(false)}
-                   className="text-slate-400 hover:text-white p-1"
-                 >
-                   <X className="w-5 h-5" />
-                 </button>
-              </div>
+          <div className="sheet">
+            <div className="mhead">
+              <h2>SEARCH COVER<small>從 Steam、IGDB、Google 搜尋封面</small></h2>
+              <button type="button" className="x" onClick={() => setIsSearchOpen(false)} aria-label="關閉封面搜尋">×</button>
+            </div>
+            <div className="mbody">
+              <form className="searchbar" onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); void runSearch(searchQuery); }}>
+                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="遊戲名稱" aria-label="搜尋遊戲名稱" autoFocus={!searchQuery} />
+                <button type="submit" className="btn cy" disabled={isSearching || !searchQuery}>{isSearching ? <span className="spin" /> : '搜尋'}</button>
+              </form>
 
-              <div className="p-3 border-b border-slate-800 space-y-3">
-                  <form 
-                    onSubmit={(e) => { e.preventDefault(); handleSearchSubmit(searchQuery); }}
-                    className="flex gap-2"
-                  >
-                     <input 
-                       type="text" 
-                       value={searchQuery}
-                       onChange={(e) => setSearchQuery(e.target.value)}
-                       placeholder="Game Name..."
-                       className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
-                       autoFocus={!searchQuery}
-                     />
-                     <button 
-                       type="submit"
-                       disabled={isSearching || !searchQuery}
-                       className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-2 rounded-lg flex items-center justify-center"
-                     >
-                        {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                     </button>
-                  </form>
-                  
-                  {/* Search Source Filters */}
-                  {searchResults.length > 0 && !isSearching && (
-                      <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
-                         <button
-                            type="button"
-                            onClick={() => setActiveSearchFilter('ALL')}
-                            className={`px-3 py-1 rounded-full text-xs font-bold border whitespace-nowrap transition-colors ${
-                               activeSearchFilter === 'ALL' 
-                               ? 'bg-slate-700 text-white border-slate-600' 
-                               : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
-                            }`}
-                         >
-                            All ({searchResults.length})
-                         </button>
-                         {getSourceCount('STEAM') > 0 && (
-                             <button
-                                type="button"
-                                onClick={() => setActiveSearchFilter('STEAM')}
-                                className={`px-3 py-1 rounded-full text-xs font-bold border whitespace-nowrap transition-colors ${
-                                   activeSearchFilter === 'STEAM' 
-                                   ? 'bg-slate-700 text-blue-200 border-slate-600' 
-                                   : 'bg-slate-900 text-slate-500 border-slate-800 hover:border-slate-700'
-                                }`}
-                             >
-                                Steam ({getSourceCount('STEAM')})
-                             </button>
-                         )}
-                         {getSourceCount('IGDB') > 0 && (
-                             <button
-                                type="button"
-                                onClick={() => setActiveSearchFilter('IGDB')}
-                                className={`px-3 py-1 rounded-full text-xs font-bold border whitespace-nowrap transition-colors ${
-                                   activeSearchFilter === 'IGDB' 
-                                   ? 'bg-purple-900/50 text-purple-200 border-purple-700' 
-                                   : 'bg-slate-900 text-slate-500 border-slate-800 hover:border-slate-700'
-                                }`}
-                             >
-                                IGDB ({getSourceCount('IGDB')})
-                             </button>
-                         )}
-                         {getSourceCount('GOOGLE') > 0 && (
-                             <button
-                                type="button"
-                                onClick={() => setActiveSearchFilter('GOOGLE')}
-                                className={`px-3 py-1 rounded-full text-xs font-bold border whitespace-nowrap transition-colors ${
-                                   activeSearchFilter === 'GOOGLE' 
-                                   ? 'bg-emerald-900/50 text-emerald-200 border-emerald-700' 
-                                   : 'bg-slate-900 text-slate-500 border-slate-800 hover:border-slate-700'
-                                }`}
-                             >
-                                Google ({getSourceCount('GOOGLE')})
-                             </button>
-                         )}
-                      </div>
-                  )}
-              </div>
+              {searchResults.length > 0 && !isSearching && (
+                <div className="chips">
+                  <button type="button" className={`chip${searchFilter === 'ALL' ? ' on' : ''}`} onClick={() => setSearchFilter('ALL')}>全部 ({searchResults.length})</button>
+                  {(['STEAM', 'IGDB', 'GOOGLE'] as const).filter(src => sourceCount(src) > 0).map(src => (
+                    <button key={src} type="button" className={`chip${searchFilter === src ? ' on' : ''}`} onClick={() => setSearchFilter(src)}>{src} ({sourceCount(src)})</button>
+                  ))}
+                </div>
+              )}
 
-              <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
-                 {isSearching ? (
-                    <div className="flex flex-col items-center justify-center h-40 text-slate-500 gap-2">
-                       <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-                       <span className="text-xs">Searching Steam, IGDB & Google...</span>
-                    </div>
-                 ) : getFilteredResults().length > 0 ? (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-                       {getFilteredResults().map((game) => {
-                          if (!game.coverUrl) return null; // Skip games without cover
-                          return (
-                             <button
-                               key={game.id}
-                               type="button"
-                               onClick={() => handleSelectImage(game.coverUrl)}
-                               className="group relative aspect-[3/4] bg-slate-950 rounded-lg overflow-hidden border border-slate-800 hover:border-indigo-500 transition-all"
-                             >
-                                <img 
-                                  src={game.coverUrl} 
-                                  alt={game.name}
-                                  className="w-full h-full object-cover"
-                                  loading="lazy"
-                                />
-                                <div className="absolute top-0 right-0 p-1">
-                                   <span className={`text-[8px] font-bold px-1 py-0.5 rounded text-white ${
-                                     game.source === 'STEAM' ? 'bg-slate-700' : 
-                                     game.source === 'IGDB' ? 'bg-purple-700' : 
-                                     'bg-emerald-600'
-                                   }`}>
-                                      {game.source}
-                                   </span>
-                                </div>
-                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                   <span className="text-white text-xs font-bold px-2 py-1 bg-indigo-600 rounded">Select</span>
-                                </div>
-                                <div className="absolute bottom-0 left-0 right-0 p-1 bg-black/70 text-[10px] text-white truncate text-center">
-                                   {game.name}
-                                </div>
-                             </button>
-                          );
-                       })}
-                    </div>
-                 ) : (
-                    <div className="flex flex-col items-center justify-center h-40 text-slate-500 text-sm">
-                       {searchQuery ? 'No results found.' : 'Enter game name to search.'}
-                    </div>
-                 )}
-              </div>
-           </div>
+              {isSearching ? (
+                <p className="empty"><span className="spin" /> 搜尋中…</p>
+              ) : visibleResults.length > 0 ? (
+                <div className="results">
+                  {visibleResults.map(game => (
+                    <button key={game.id} type="button" className="res" onClick={() => selectSearchImage(game.coverUrl)} title={game.name}>
+                      <img src={game.coverUrl} alt={game.name} loading="lazy" />
+                      <span className="src">{game.source}</span>
+                      <span className="nm2">{game.name}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty">{searchQuery ? '找不到結果。' : '輸入遊戲名稱開始搜尋。'}</p>
+              )}
+            </div>
+          </div>
         )}
-
       </div>
     </div>
   );

@@ -1,8 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-// CSS is loaded via index.html <style> and Tailwind CDN for Preview compatibility
-// import './index.css'; 
+import './index.css';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

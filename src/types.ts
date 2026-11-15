@@ -36,6 +36,9 @@ export interface Game {
   addedAt: number;
 }
 
+/** 新增／編輯表單送出的欄位（不含 id 與 addedAt） */
+export type GameInput = Omit<Game, 'id' | 'addedAt'>;
+
 export type SortOption = 'SCORE_DESC' | 'SCORE_ASC' | 'DATE_DESC' | 'DATE_ASC' | 'PLAYTIME_DESC' | 'PLAYTIME_ASC';
 
 export interface GameInfoResponse {

@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where, getDoc, setDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, deleteDoc, doc, query, where, getDoc, setDoc, writeBatch } from 'firebase/firestore';
 import { Game, Platform } from '../types';
 
 // Firebase config from environment variables
@@ -132,16 +132,6 @@ export const getUserBackupGames = async (userId: string): Promise<Game[]> => {
   }
 };
 
-export const addGame = async (game: Omit<Game, 'id'>, userId: string): Promise<string> => {
-  try {
-    const docRef = await addDoc(collection(db, 'games'), { ...game, userId });
-    return docRef.id;
-  } catch (error) {
-    console.error("Error adding game", error);
-    throw error;
-  }
-};
-
 export const saveUserBackupGames = async (userId: string, games: Game[]): Promise<void> => {
   try {
     const backupCollection = collection(db, 'users', userId, 'backups');
@@ -174,26 +164,33 @@ export const saveUserBackupGames = async (userId: string, games: Game[]): Promis
   }
 };
 
-export const updateGame = async (id: string, game: Partial<Game>, userId?: string): Promise<void> => {
-  try {
-    const gameRef = doc(db, 'games', id);
-    // Ensure userId is included in the write if provided. This avoids
-    // Firestore rules rejecting the update when request.resource.data.userId
-    // is expected to match request.auth.uid.
-    const payload = userId ? { ...game, userId } : game;
-    await setDoc(gameRef, payload, { merge: true });
-  } catch (error) {
-    console.error("Error updating game", error);
-    throw error;
-  }
+// 新遊戲的 id 在本機就能產生，畫面不必等雲端回應
+export const newGameId = (): string => doc(collection(db, 'games')).id;
+
+// 兩個存放位置都寫（讀取時以 backups 為主、games 為備援），只要其中一處成功就算存好。
+const settleEither = async (label: string, writes: Promise<unknown>[]): Promise<void> => {
+  const results = await Promise.allSettled(writes);
+  const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+  failures.forEach((f) => console.warn(`${label}: one store rejected the write`, f.reason));
+  if (failures.length === results.length) throw failures[0].reason;
 };
 
-export const deleteGame = async (id: string): Promise<void> => {
-  try {
-    const gameRef = doc(db, 'games', id);
-    await deleteDoc(gameRef);
-  } catch (error) {
-    console.error("Error deleting game", error);
-    throw error;
-  }
+/**
+ * 只寫入「這一款」遊戲。取代以往每次儲存都把整個收藏刪掉重寫的做法。
+ * isNew 時給一個比現有都小的 backupOrder，重新載入後仍排在最前面。
+ */
+export const saveGameRecord = async (userId: string, game: Game, isNew: boolean): Promise<void> => {
+  const { id, ...data } = game;
+  const now = Date.now();
+  await settleEither('saveGameRecord', [
+    setDoc(doc(db, 'users', userId, 'backups', id), { ...game, updatedAt: now, ...(isNew ? { backupOrder: -now } : {}) }, { merge: true }),
+    setDoc(doc(db, 'games', id), { ...data, userId }, { merge: true }),
+  ]);
+};
+
+export const deleteGameRecord = async (userId: string, id: string): Promise<void> => {
+  await settleEither('deleteGameRecord', [
+    deleteDoc(doc(db, 'users', userId, 'backups', id)),
+    deleteDoc(doc(db, 'games', id)),
+  ]);
 };
