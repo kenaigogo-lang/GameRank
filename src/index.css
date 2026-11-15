@@ -28,6 +28,7 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 h1, h2, h3, h4, p, ol { margin: 0; padding: 0; }
 :focus-visible { outline: 2px dashed var(--fg); outline-offset: 3px; }
+[hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
