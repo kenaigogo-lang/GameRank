@@ -415,13 +415,23 @@ const App = () => {
           <input type="file" ref={fileInputRef} onChange={handleRestoreJSON} accept=".json" hidden />
         </div>
 
-        <div className="hi">
-          <span>1UP　{String(stats.total).padStart(2, '0')} GAMES</span>
-          <span className="mid">HI-SCORE　{stats.avgScore}</span>
-          <span>PLAY　{stats.totalPlaytime}H</span>
-        </div>
         <h1 className="marquee">GAMERANK</h1>
         <p className="sub">— 我的遊戲排行榜 —</p>
+        <dl className="stats" aria-label={activeTab === 'ALL' ? '全部平台統計' : `${activeTab} 平台統計`}>
+          <div>
+            <dt>遊戲總數</dt>
+            <dd className="c2">{stats.total}<small>款</small></dd>
+          </div>
+          <div>
+            <dt>平均分數</dt>
+            <dd className="c0">{stats.avgScore}<small>/ 10</small></dd>
+          </div>
+          <div>
+            <dt>遊戲總時數</dt>
+            <dd className="c3">{stats.totalPlaytime}<small>小時</small></dd>
+          </div>
+        </dl>
+        <p className="scope">{activeTab === 'ALL' ? '全部平台合計' : `僅計算 ${activeTab} 平台`}</p>
         <button type="button" className="coin" onClick={() => setIsModalOpen(true)}>
           <i>INSERT COIN</i>＋ 新增遊戲
         </button>
