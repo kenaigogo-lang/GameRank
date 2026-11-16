@@ -1,4 +1,5 @@
 import React from 'react';
+import { useUi } from '../theme';
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -10,37 +11,34 @@ interface ConfirmModalProps {
 }
 
 export const ConfirmModal: React.FC<ConfirmModalProps> = ({ isOpen, onClose, onConfirm, title, message, isAlert = false }) => {
+  const ui = useUi();
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-        <div className="p-5 border-b border-slate-800 bg-slate-800/50">
-          <h2 className="text-lg font-bold text-white">{title}</h2>
+    <div className="mback top-most" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div className={`${ui.box} sm`}>
+        <div className="mhead">
+          <h2 id="confirm-title">{title}</h2>
         </div>
-        <div className="p-6">
-          <p className="text-slate-300 text-sm leading-relaxed font-medium">
-            {message}
-          </p>
-        </div>
-        <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex justify-end gap-3">
-          {!isAlert && (
+        <div className="mbody">
+          <p className="msg">{message}</p>
+          <div className="mfoot">
+            {!isAlert && (
+              <button type="button" className={ui.btn} onClick={onClose}>取消</button>
+            )}
             <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+              type="button"
+              className={ui.btnConfirm}
+              autoFocus
+              onClick={() => {
+                // 先關再執行：onConfirm 可能會開啟下一個對話框
+                onClose();
+                onConfirm();
+              }}
             >
-              取消
+              確定
             </button>
-          )}
-          <button
-            onClick={() => {
-              onConfirm();
-              onClose();
-            }}
-            className="px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg shadow-lg shadow-blue-900/20 transition-all"
-          >
-            確定
-          </button>
+          </div>
         </div>
       </div>
     </div>

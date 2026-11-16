@@ -1,34 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-body {
-  background-color: #0f172a;
-  color: #f8fafc;
-}
-
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #1e293b; 
-}
-::-webkit-scrollbar-thumb {
-  background: #475569; 
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #64748b; 
-}
-
-/* Ensure calendar icon is visible in dark mode */
-input[type="date"]::-webkit-calendar-picker-indicator {
-  cursor: pointer;
-  filter: invert(1);
-  opacity: 0.6;
-  transition: opacity 0.2s;
-}
-
-input[type="date"]::-webkit-calendar-picker-indicator:hover {
-  opacity: 1;
-}
+/* 兩套主題共用的最小基礎；主題本身在 src/themes/，以 <html data-theme> 切換 */
+[hidden] { display: none !important; }
+@keyframes blink { 50% { opacity: .25; } }
+@keyframes spin { to { transform: rotate(360deg); } }

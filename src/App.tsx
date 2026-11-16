@@ -1,26 +1,43 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Game, Platform, GENRE_OPTIONS, SortOption } from './types';
-import { GameCard } from './components/GameCard';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Game, GameInput, Platform, GENRE_OPTIONS, SortOption } from './types';
+import { normalizeScore } from './components/GameCard';
+import { NesView } from './views/NesView';
+import { ArcadeView } from './views/ArcadeView';
+import { ThemeContext, ThemeName, applyTheme, loadTheme } from './theme';
 import { AddGameModal } from './components/AddGameModal';
 import { ConfirmModal } from './components/ConfirmModal';
-import { Plus, Gamepad2, Layers, UploadCloud, FileJson, Filter, LogIn, LogOut, CloudDownload, ArrowUpDown } from 'lucide-react';
-import { signInWithGoogle, logout, getGames, getUserBackupGames, saveUserBackupGames, addGame, updateGame, deleteGame, auth } from './services/firebase';
+import { signInWithGoogle, logout, getGames, getUserBackupGames, saveUserBackupGames, saveGameRecord, deleteGameRecord, newGameId, auth } from './services/firebase';
 import { User, onAuthStateChanged } from 'firebase/auth';
 
-const APP_VERSION = '202512010000';
+const APP_VERSION = '202611150000';
+
+const PLATFORMS = [Platform.PS, Platform.XBOX, Platform.SWITCH, Platform.PC];
+
+const SORT_LABELS: [SortOption, string][] = [
+  ['SCORE_DESC', '分數 高→低'],
+  ['SCORE_ASC', '分數 低→高'],
+  ['DATE_DESC', '日期 新→舊'],
+  ['DATE_ASC', '日期 舊→新'],
+  ['PLAYTIME_DESC', '時數 長→短'],
+  ['PLAYTIME_ASC', '時數 短→長'],
+];
 
 const migrateGameData = (data: any[]): Game[] => {
   return data.map(g => {
     let newPlatform = g.platform;
     if (g.platform === 'PS5') newPlatform = Platform.PS;
     if (g.platform === 'STEAM') newPlatform = Platform.PC;
-    
-    return {
-      ...g,
-      platform: newPlatform
-    };
+    return { ...g, platform: newPlatform };
   });
 };
+
+interface DialogState {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  isAlert?: boolean;
+}
 
 const App = () => {
   const [games, setGames] = useState<Game[]>([]);
@@ -28,82 +45,89 @@ const App = () => {
   const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [activeTab, setActiveTab] = useState<'ALL' | Platform>('ALL');
   const [activeGenre, setActiveGenre] = useState<string>('ALL');
-  const [sortOption, setSortOption] = useState<SortOption>('SCORE_DESC'); 
+  const [sortOption, setSortOption] = useState<SortOption>('SCORE_DESC');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // 背景中尚未完成的雲端寫入數量
+  const [pendingWrites, setPendingWrites] = useState(0);
+  const [theme, setTheme] = useState<ThemeName>(loadTheme);
 
-  const [confirmModal, setConfirmModal] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
-    isAlert?: boolean;
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {},
-    isAlert: false
-  });
+  const [dialog, setDialog] = useState<DialogState>({ isOpen: false, title: '', message: '', onConfirm: () => {}, isAlert: false });
 
-  useEffect(() => {
-    if (auth) {
-        const unsubscribe = onAuthStateChanged(auth, async (currentUser: User | null) => {
-            setUser(currentUser);
-            if (currentUser) {
-              setIsLoading(true);
-              try {
-                let userGames = await getUserBackupGames(currentUser.uid);
-                if (userGames.length === 0) {
-                  userGames = await getGames(currentUser.uid);
-                }
-                setGames(userGames);
-              } catch (e) {
-                console.error("Error loading games", e);
-              } finally {
-                setIsLoading(false);
-              }
-            } else {
-              setGames([]);
-              setIsLoading(false);
-            }
-        });
-        return unsubscribe;
-    } else {
-      setIsLoading(false);
-    }
+  // 讓穩定的 callback 也能讀到最新的資料
+  const gamesRef = useRef(games);
+  gamesRef.current = games;
+  const userRef = useRef(user);
+  userRef.current = user;
+
+  const showAlert = useCallback((title: string, message: string) => {
+    setDialog({ isOpen: true, title, message, onConfirm: () => {}, isAlert: true });
   }, []);
 
   useEffect(() => {
-    setActiveGenre('ALL');
-  }, [activeTab]);
+    if (!auth) {
+      setIsLoading(false);
+      return;
+    }
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser: User | null) => {
+      setUser(currentUser);
+      if (currentUser) {
+        setIsLoading(true);
+        try {
+          let userGames = await getUserBackupGames(currentUser.uid);
+          if (userGames.length === 0) {
+            userGames = await getGames(currentUser.uid);
+          }
+          setGames(userGames);
+        } catch (e) {
+          console.error('Error loading games', e);
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        setGames([]);
+        setIsLoading(false);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  // 還有寫入沒完成時，關閉分頁前提醒
+  useEffect(() => {
+    if (pendingWrites === 0) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [pendingWrites]);
+
+  /**
+   * 畫面已經先更新了，這裡在背景把變動寫到雲端；失敗就還原畫面並告知。
+   */
+  const syncInBackground = useCallback(async (write: () => Promise<void>, rollback: () => void, what: string) => {
+    setPendingWrites(n => n + 1);
+    try {
+      await write();
+    } catch (error: any) {
+      console.error(`Cloud write failed (${what})`, error);
+      rollback();
+      showAlert('儲存失敗', `「${what}」沒有存到雲端，畫面已還原成變更前的樣子。\n\n${error?.message || '請檢查網路後再試一次。'}`);
+    } finally {
+      setPendingWrites(n => n - 1);
+    }
+  }, [showAlert]);
 
   const handleLogin = async () => {
     try {
-        await signInWithGoogle();
+      await signInWithGoogle();
     } catch (e: any) {
-        console.error("Login Error:", e);
-        if (e.code === 'auth/unauthorized-domain') {
-            setConfirmModal({
-                isOpen: true,
-                title: 'Login Failed',
-                message: `Domain not authorized.\n\nPlease go to Firebase Console -> Authentication -> Settings -> Authorized Domains.\nAdd this domain:\n\n${window.location.hostname}`,
-                onConfirm: () => {},
-                isAlert: true
-            });
-        } else if (e.code === 'auth/popup-closed-by-user') {
-            // User closed popup, ignore
-        } else {
-            setConfirmModal({
-                isOpen: true,
-                title: 'Login Failed',
-                message: e.message,
-                onConfirm: () => {},
-                isAlert: true
-            });
-        }
+      console.error('Login Error:', e);
+      if (e.code === 'auth/unauthorized-domain') {
+        showAlert('登入失敗', `這個網域尚未授權。\n\n請到 Firebase Console → Authentication → Settings → Authorized domains 加入：\n\n${window.location.hostname}`);
+      } else if (e.code !== 'auth/popup-closed-by-user') {
+        showAlert('登入失敗', e.message);
+      }
     }
   };
 
@@ -111,137 +135,85 @@ const App = () => {
     await logout();
   };
 
-  const handleSaveGame = async (title: string, platform: Platform, score: number, comment: string, genre: string, ratingDate: string, imageUrl: string, playtime: number) => {
+  const closeModal = useCallback(() => {
+    setIsModalOpen(false);
+    setEditingGame(null);
+  }, []);
+
+  const handleSaveGame = (input: GameInput) => {
     if (!user) {
-      setConfirmModal({
-        isOpen: true,
-        title: 'Login Required',
-        message: 'Please log in to save ratings.',
-        onConfirm: () => {},
-        isAlert: true
-      });
+      showAlert('請先登入', '登入後才能儲存評分。');
       return;
     }
 
-    const normalizedTitle = title.trim().toLowerCase();
-    const isDuplicate = games.some(g => 
-      g.title.trim().toLowerCase() === normalizedTitle && 
-      g.platform === platform && 
+    const normalizedTitle = input.title.trim().toLowerCase();
+    const isDuplicate = games.some(g =>
+      g.title.trim().toLowerCase() === normalizedTitle &&
+      g.platform === input.platform &&
       (!editingGame || g.id !== editingGame.id)
     );
-
     if (isDuplicate) {
-      setConfirmModal({
-        isOpen: true,
-        title: 'Duplicate Game',
-        message: `${platform}版的${title}已經評分過囉!`,
-        onConfirm: () => {},
-        isAlert: true
-      });
+      showAlert('重複的遊戲', `${input.platform} 版的《${input.title}》已經評分過囉！`);
       return;
     }
 
-    try {
-      let newGameData;
-      if (editingGame) {
-        const updatedGame = {
-          title,
-          platform,
-          score,
-          comment,
-          genre,
-          ratingDate,
-          imageUrl,
-          playtime,
-        };
-        try {
-          await updateGame(editingGame.id, updatedGame, user?.uid || undefined);
-        } catch (err) {
-          console.warn('Failed to update games collection, updating locally only', err);
-        }
-        setGames(prev => prev.map(g => g.id === editingGame.id ? { ...g, ...updatedGame } : g));
-        newGameData = [{ id: editingGame.id, ...updatedGame }, ...games.filter(g => g.id !== editingGame.id)];
-      } else {
-        const newGame = {
-          title,
-          platform,
-          score,
-          comment,
-          genre,
-          ratingDate,
-          imageUrl,
-          playtime,
-          addedAt: Date.now(),
-        };
-        let newId: string;
-        try {
-          newId = await addGame(newGame, user.uid);
-        } catch (error) {
-          console.warn('Failed to write to games collection, using local backup only', error);
-          newId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-            ? crypto.randomUUID()
-            : `${Date.now()}`;
-        }
-        setGames(prev => [{ id: newId, ...newGame }, ...prev]);
-        newGameData = [{ id: newId, ...newGame }, ...games];
-      }
-
-      try {
-        await saveUserBackupGames(user.uid, newGameData as Game[]);
-      } catch (backupError) {
-        console.warn('Failed to auto backup games after save', backupError);
-      }
-
+    const uid = user.uid;
+    if (editingGame) {
+      const previous = editingGame;
+      const updated: Game = { ...previous, ...input };
+      setGames(prev => prev.map(g => (g.id === previous.id ? updated : g)));
       closeModal();
-    } catch (error) {
-      console.error("Error saving game", error);
-      setConfirmModal({
-        isOpen: true,
-        title: 'Error',
-        message: 'Failed to save game.',
-        onConfirm: () => {},
-        isAlert: true
-      });
+      void syncInBackground(
+        () => saveGameRecord(uid, updated, false),
+        () => setGames(prev => prev.map(g => (g.id === previous.id ? previous : g))),
+        `修改《${input.title}》`
+      );
+    } else {
+      const created: Game = { id: newGameId(), ...input, addedAt: Date.now() };
+      setGames(prev => [created, ...prev]);
+      closeModal();
+      void syncInBackground(
+        () => saveGameRecord(uid, created, true),
+        () => setGames(prev => prev.filter(g => g.id !== created.id)),
+        `新增《${input.title}》`
+      );
     }
   };
 
-  const handleEditGame = (id: string) => {
-    const game = games.find(g => g.id === id);
+  const handleEditGame = useCallback((id: string) => {
+    const game = gamesRef.current.find(g => g.id === id);
     if (game) {
       setEditingGame(game);
       setIsModalOpen(true);
     }
-  };
+  }, []);
 
-  const handleDeleteGame = (id: string) => {
-    setConfirmModal({
+  const handleDeleteGame = useCallback((id: string) => {
+    const target = gamesRef.current.find(g => g.id === id);
+    if (!target) return;
+    setDialog({
       isOpen: true,
-      title: 'Delete Game',
-      message: 'Are you sure you want to delete this rating?',
+      title: '刪除評分',
+      message: `確定要刪除《${target.title}》的評分嗎？`,
       isAlert: false,
-      onConfirm: async () => {
-        try {
-          await deleteGame(id);
-        } catch (error) {
-          console.warn('Failed to delete from games collection, deleting locally only', error);
-        }
-        const updated = games.filter(g => g.id !== id);
-        setGames(updated);
-        if (user) {
-          try {
-            await saveUserBackupGames(user.uid, updated);
-          } catch (backupError) {
-            console.warn('Failed to backup updated games after delete', backupError);
-          }
-        }
-      }
+      onConfirm: () => {
+        const index = gamesRef.current.findIndex(g => g.id === id);
+        setGames(prev => prev.filter(g => g.id !== id));
+        const uid = userRef.current?.uid;
+        if (!uid) return;
+        void syncInBackground(
+          () => deleteGameRecord(uid, id),
+          () => setGames(prev => {
+            if (prev.some(g => g.id === id)) return prev;
+            const next = prev.slice();
+            next.splice(Math.min(Math.max(index, 0), next.length), 0, target);
+            return next;
+          }),
+          `刪除《${target.title}》`
+        );
+      },
     });
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setEditingGame(null);
-  };
+  }, [syncInBackground]);
 
   const handleBackupJSON = () => {
     const jsonContent = JSON.stringify(games, null, 2);
@@ -253,8 +225,8 @@ const App = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
-
 
   const handleRestoreJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -265,29 +237,37 @@ const App = () => {
       try {
         const json = JSON.parse(event.target?.result as string);
         if (Array.isArray(json)) {
-           setConfirmModal({
-               isOpen: true,
-               title: 'Import JSON',
-               message: `Found ${json.length} games in backup. This will replace your current list. Continue?`,
-               isAlert: false,
-               onConfirm: () => {
-                   const migrated = migrateGameData(json);
-                   setGames(migrated);
-                   setConfirmModal({
-                       isOpen: true,
-                       title: 'Success',
-                       message: 'Restored successfully!',
-                       onConfirm: () => {},
-                       isAlert: true
-                   });
-               }
-           });
+          setDialog({
+            isOpen: true,
+            title: '匯入 JSON',
+            message: `備份檔裡有 ${json.length} 款遊戲，匯入後會取代目前的清單${user ? '並寫回雲端' : ''}。要繼續嗎？`,
+            isAlert: false,
+            onConfirm: async () => {
+              const migrated = migrateGameData(json);
+              setGames(migrated);
+              if (!user) {
+                showAlert('匯入完成', '已載入備份檔。目前尚未登入，這些資料只在這個畫面上，登入後按「雲端備份」才會保存。');
+                return;
+              }
+              // 整份取代是少見操作，這裡才使用整批寫入
+              setPendingWrites(n => n + 1);
+              try {
+                await saveUserBackupGames(user.uid, migrated);
+                showAlert('匯入完成', '備份檔已匯入並存到雲端。');
+              } catch (error: any) {
+                console.error('Failed to persist imported games', error);
+                showAlert('匯入未存到雲端', `資料已顯示在畫面上，但寫回雲端失敗，重新整理後會消失。\n\n${error?.message || ''}`);
+              } finally {
+                setPendingWrites(n => n - 1);
+              }
+            },
+          });
         } else {
-          alert('Invalid backup file format.');
+          showAlert('匯入失敗', '備份檔格式不正確。');
         }
       } catch (error) {
         console.error('Error parsing JSON', error);
-        alert('Failed to restore data. Invalid JSON file.');
+        showAlert('匯入失敗', '這不是有效的 JSON 檔。');
       }
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -298,52 +278,26 @@ const App = () => {
 
   const handleRestoreFromFirestore = async () => {
     if (!user) {
-      setConfirmModal({
-        isOpen: true,
-        title: 'Login Required',
-        message: 'Please log in to restore your saved games from Firestore.',
-        onConfirm: () => {},
-        isAlert: true
-      });
+      showAlert('請先登入', '登入後才能從雲端還原。');
       return;
     }
 
     setIsLoading(true);
     try {
-      let userGames: Game[] = [];
-
-      userGames = await getUserBackupGames(user.uid);
+      let userGames = await getUserBackupGames(user.uid);
       if (userGames.length === 0) {
         userGames = await getGames(user.uid);
       }
 
       if (userGames.length === 0) {
-        setConfirmModal({
-          isOpen: true,
-          title: 'No Data Found',
-          message: 'No saved games were found in Firestore for this account.',
-          onConfirm: () => {},
-          isAlert: true
-        });
+        showAlert('找不到資料', '這個帳號在雲端沒有已儲存的遊戲。');
       } else {
         setGames(userGames);
-        setConfirmModal({
-          isOpen: true,
-          title: 'Restore Complete',
-          message: 'Your saved games have been restored from Firestore.',
-          onConfirm: () => {},
-          isAlert: true
-        });
+        showAlert('還原完成', `已從雲端還原 ${userGames.length} 款遊戲。`);
       }
     } catch (error: any) {
       console.error('Error restoring games from Firestore', error);
-      setConfirmModal({
-        isOpen: true,
-        title: 'Restore Failed',
-        message: `Unable to restore games from Firestore. ${error?.message || 'Please try again.'}`,
-        onConfirm: () => {},
-        isAlert: true
-      });
+      showAlert('還原失敗', `無法從雲端還原。${error?.message || '請再試一次。'}`);
     } finally {
       setIsLoading(false);
     }
@@ -351,30 +305,16 @@ const App = () => {
 
   const handleBackupToFirestore = async () => {
     if (!user) {
-      setConfirmModal({
-        isOpen: true,
-        title: 'Login Required',
-        message: 'Please log in to back up your games to Firestore.',
-        onConfirm: () => {},
-        isAlert: true
-      });
+      showAlert('請先登入', '登入後才能備份到雲端。');
       return;
     }
 
-    setIsLoading(true);
+    setPendingWrites(n => n + 1);
     try {
       await saveUserBackupGames(user.uid, games);
-      setConfirmModal({
-        isOpen: true,
-        title: 'Backup Complete',
-        message: 'Your games were backed up to Firestore successfully.',
-        onConfirm: () => {},
-        isAlert: true
-      });
+      showAlert('備份完成', `已把 ${games.length} 款遊戲完整備份到雲端。`);
     } catch (error: any) {
       console.error('Error backing up games to Firestore', error);
-
-      // If error looks like a permission issue, fallback to local JSON export
       const msg = String(error?.message || error || '');
       const isPermissionError = /permission|authorize|auth|insufficient/i.test(msg);
 
@@ -384,394 +324,137 @@ const App = () => {
         } catch (e) {
           console.error('Failed to create local JSON backup', e);
         }
-
-        setConfirmModal({
-          isOpen: true,
-          title: 'Backup Saved Locally',
-          message: 'Could not save to Firestore due to permissions. A local JSON backup has been downloaded instead. Please check your Firebase security rules or log in with an account that has write access.',
-          onConfirm: () => {},
-          isAlert: true
-        });
+        showAlert('已改存到本機', '因為權限問題無法寫入雲端，已改為下載一份 JSON 備份檔。請檢查 Firebase 安全規則。');
       } else {
-        setConfirmModal({
-          isOpen: true,
-          title: 'Backup Failed',
-          message: `Unable to back up games to Firestore. ${error?.message || 'Please try again.'}`,
-          onConfirm: () => {},
-          isAlert: true
-        });
+        showAlert('備份失敗', `無法備份到雲端。${error?.message || '請再試一次。'}`);
       }
     } finally {
-      setIsLoading(false);
+      setPendingWrites(n => n - 1);
     }
   };
 
-  const triggerFileInput = () => {
-    fileInputRef.current?.click();
-  };
+  const gamesInTab = useMemo(
+    () => (activeTab === 'ALL' ? games : games.filter(g => g.platform === activeTab)),
+    [games, activeTab]
+  );
 
   const filteredGames = useMemo(() => {
-    let filtered = games;
-    if (activeTab !== 'ALL') {
-      filtered = filtered.filter(g => g.platform === activeTab);
-    }
-    if (activeGenre !== 'ALL') {
-      filtered = filtered.filter(g => (g.genre || '').includes(activeGenre));
-    }
-    
-    return filtered.sort((a, b) => {
+    const filtered = activeGenre === 'ALL'
+      ? gamesInTab
+      : gamesInTab.filter(g => (g.genre || '').split(', ').includes(activeGenre));
+
+    // 先複製再排序，避免直接改動 state 裡的陣列
+    return [...filtered].sort((a, b) => {
       switch (sortOption) {
-        case 'SCORE_DESC':
-          return b.score - a.score;
         case 'SCORE_ASC':
-          return a.score - b.score;
+          return normalizeScore(a.score) - normalizeScore(b.score);
         case 'DATE_DESC':
-          return b.ratingDate.localeCompare(a.ratingDate);
+          return (b.ratingDate || '').localeCompare(a.ratingDate || '');
         case 'DATE_ASC':
-          return a.ratingDate.localeCompare(b.ratingDate);
+          return (a.ratingDate || '').localeCompare(b.ratingDate || '');
         case 'PLAYTIME_DESC':
           return (b.playtime || 0) - (a.playtime || 0);
         case 'PLAYTIME_ASC':
           return (a.playtime || 0) - (b.playtime || 0);
+        case 'SCORE_DESC':
         default:
-          return b.score - a.score;
+          return normalizeScore(b.score) - normalizeScore(a.score);
       }
     });
-  }, [games, activeTab, activeGenre, sortOption]);
+  }, [gamesInTab, activeGenre, sortOption]);
 
   const stats = useMemo(() => {
-    const targetGames = activeTab === 'ALL' 
-      ? games 
-      : games.filter(g => g.platform === activeTab);
-
-    const total = targetGames.length;
-    const avgScore = total > 0 ? (targetGames.reduce((acc, g) => {
-        const normalizedScore = g.score > 10 ? g.score / 10 : g.score;
-        return acc + normalizedScore;
-    }, 0) / total).toFixed(1) : '0';
-    const totalPlaytime = targetGames.reduce((acc, g) => acc + (g.playtime || 0), 0);
+    const total = gamesInTab.length;
+    const avgScore = total > 0
+      ? (gamesInTab.reduce((acc, g) => acc + normalizeScore(g.score), 0) / total).toFixed(1)
+      : '0';
+    const totalPlaytime = gamesInTab.reduce((acc, g) => acc + (g.playtime || 0), 0);
     return { total, avgScore, totalPlaytime };
-  }, [games, activeTab]);
+  }, [gamesInTab]);
 
   const sortedGenres = useMemo(() => {
     const counts: Record<string, number> = {};
-    GENRE_OPTIONS.forEach(g => counts[g] = 0);
-    
-    const gamesToCount = activeTab === 'ALL' 
-      ? games 
-      : games.filter(g => g.platform === activeTab);
-
-    gamesToCount.forEach(g => {
-      if (g.genre) {
-        g.genre.split(', ').forEach(genre => {
-          const trimmed = genre.trim();
-          if (counts[trimmed] !== undefined) {
-            counts[trimmed]++;
-          }
-        });
-      }
-    });
-
-    return [...GENRE_OPTIONS]
-      .filter(g => counts[g] > 0)
-      .sort((a, b) => {
-        const diff = (counts[b] || 0) - (counts[a] || 0);
-        if (diff !== 0) return diff;
-        return GENRE_OPTIONS.indexOf(a) - GENRE_OPTIONS.indexOf(b);
+    gamesInTab.forEach(g => {
+      (g.genre || '').split(', ').forEach(genre => {
+        const trimmed = genre.trim();
+        if (trimmed) counts[trimmed] = (counts[trimmed] || 0) + 1;
       });
-  }, [games, activeTab]);
+    });
+    return GENRE_OPTIONS
+      .filter(g => counts[g] > 0)
+      .sort((a, b) => counts[b] - counts[a] || GENRE_OPTIONS.indexOf(a) - GENRE_OPTIONS.indexOf(b));
+  }, [gamesInTab]);
 
-  const sortedPlatforms = useMemo(() => {
-    const counts: Record<string, number> = {
-        [Platform.PS]: 0,
-        [Platform.XBOX]: 0,
-        [Platform.SWITCH]: 0,
-        [Platform.PC]: 0
-    };
-
+  const platformTabs = useMemo(() => {
+    const counts: Record<string, number> = { ALL: games.length };
+    PLATFORMS.forEach(p => { counts[p] = 0; });
     games.forEach(g => {
-        if (counts[g.platform] !== undefined) {
-            counts[g.platform]++;
-        }
+      if (counts[g.platform] !== undefined) counts[g.platform]++;
     });
-
-    const platforms = [Platform.PS, Platform.XBOX, Platform.SWITCH, Platform.PC];
-
-    const sorted = platforms.sort((a, b) => {
-        const diff = counts[b] - counts[a];
-        if (diff !== 0) return diff;
-        return platforms.indexOf(a) - platforms.indexOf(b);
-    });
-
-    return ['ALL', ...sorted] as const;
+    const sorted = [...PLATFORMS].sort((a, b) => counts[b] - counts[a] || PLATFORMS.indexOf(a) - PLATFORMS.indexOf(b));
+    return { tabs: ['ALL', ...sorted] as ('ALL' | Platform)[], counts };
   }, [games]);
 
+  const selectTab = (tab: 'ALL' | Platform) => {
+    setActiveTab(tab);
+    setActiveGenre('ALL');
+  };
+
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => {
+      const next: ThemeName = prev === 'nes' ? 'arcade' : 'nes';
+      applyTheme(next);
+      return next;
+    });
+  }, []);
+
+  const View = theme === 'arcade' ? ArcadeView : NesView;
+
   return (
-    <div className="min-h-screen bg-slate-950 pb-20">
-      <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 backdrop-blur-md bg-opacity-80">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-tr from-blue-600 to-indigo-600 p-2 rounded-lg">
-              <Gamepad2 className="w-6 h-6 text-white" />
-            </div>
-            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400 hidden sm:block">
-              GameRank
-            </h1>
-          </div>
-
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-x-auto whitespace-nowrap">
-            <button
-              onClick={handleBackupJSON}
-              title="Export JSON"
-              className="flex items-center justify-center px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
-            >
-              <FileJson className="w-3.5 h-3.5" />
-              {!user ? <span className="hidden sm:inline">Export</span> : <span className="sr-only">Export JSON</span>}
-            </button>
-
-            <button
-              onClick={triggerFileInput}
-              title="Import JSON"
-              className="flex items-center justify-center px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
-            >
-              <UploadCloud className="w-3.5 h-3.5" />
-              {!user ? <span className="hidden sm:inline">Import</span> : <span className="sr-only">Import JSON</span>}
-            </button>
-
-            {user && (
-              <button
-                onClick={handleBackupToFirestore}
-                title="Backup to cloud"
-                className="flex items-center justify-center px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-                <span className="sr-only">Backup to cloud</span>
-              </button>
-            )}
-
-            {user && (
-              <button
-                onClick={handleRestoreFromFirestore}
-                title="Restore from cloud"
-                className="flex items-center justify-center px-2.5 py-2 text-[10px] font-medium text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50"
-              >
-                <CloudDownload className="w-3.5 h-3.5" />
-                <span className="sr-only">Restore from cloud</span>
-              </button>
-            )}
-
-            {!user && (
-              <button
-                onClick={handleLogin}
-                className="flex items-center gap-2 px-2.5 sm:px-3 py-2 text-xs font-medium text-white bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Log In</span>
-              </button>
-            )}
-
-            {user && (
-              <button
-                onClick={handleLogout}
-                className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"
-                title="Logout"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            )}
-
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleRestoreJSON}
-              accept=".json"
-              className="hidden"
-            />
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="flex shrink-0 items-center gap-2 px-4 py-2 bg-white text-slate-900 hover:bg-slate-200 font-bold rounded-lg transition-colors shadow-lg shadow-white/10"
-            >
-              <Plus className="w-5 h-5" />
-              <span className="hidden sm:inline">Add Game</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        
-        {/* Top Dashboard Bar */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 lg:gap-6 mb-8">
-            
-            {/* Stats Group */}
-            <div className="bg-slate-900/50 border border-slate-800 rounded-2xl py-4 shadow-sm w-full lg:w-[500px] shrink-0">
-               <div className="grid grid-cols-3 divide-x divide-slate-800">
-                 <div className="flex flex-col items-center justify-center px-4">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Total Games</span>
-                    <span className="text-2xl md:text-3xl font-bold text-white leading-none">{stats.total}</span>
-                 </div>
-                 <div className="flex flex-col items-center justify-center px-4">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Avg Score</span>
-                    <div className="flex items-baseline gap-1.5 leading-none">
-                       <span className="text-2xl md:text-3xl font-bold text-indigo-400">{stats.avgScore}</span>
-                       <span className="text-[10px] md:text-xs font-medium text-slate-600">/ 10</span>
-                    </div>
-                 </div>
-                  <div className="flex flex-col items-center justify-center px-4">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Playtime</span>
-                    <div className="flex items-baseline gap-1.5 leading-none">
-                        <span className="text-2xl md:text-3xl font-bold text-emerald-400">{stats.totalPlaytime}</span>
-                        <span className="text-[10px] md:text-xs font-medium text-slate-600">h</span>
-                    </div>
-                 </div>
-               </div>
-            </div>
-  
-            {/* Platform Filter Group */}
-            <div className="bg-slate-900/50 p-1 md:p-1.5 rounded-2xl border border-slate-800 w-full lg:flex-1">
-               <div className="grid grid-cols-5 w-full gap-1 h-full">
-                 {sortedPlatforms.map((tab) => (
-                   <button
-                     key={tab}
-                     onClick={() => setActiveTab(tab)}
-                     className={`px-1 md:px-6 py-2 md:py-3 rounded-xl font-bold transition-all whitespace-nowrap text-center flex items-center justify-center ${
-                       activeTab === tab
-                         ? 'bg-slate-800 text-white shadow-md border border-slate-700'
-                         : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                     }`}
-                   >
-                     <span className="text-[10px] md:text-sm">
-                       {tab === 'ALL' 
-                         ? <><span className="block sm:hidden">All</span><span className="hidden sm:block">All Platforms</span></>
-                         : tab
-                       }
-                     </span>
-                   </button>
-                 ))}
-               </div>
-            </div>
-        </div>
-
-        {/* Filters and Sorting Toolbar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-            {/* Genre Filters */}
-            <div className="overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 custom-scrollbar flex-1 w-full sm:w-auto">
-               <div className="flex gap-2 min-w-max">
-                  <div className="flex items-center px-2 text-slate-500">
-                    <Filter className="w-4 h-4" />
-                  </div>
-                  <button
-                    onClick={() => setActiveGenre('ALL')}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                      activeGenre === 'ALL'
-                        ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50'
-                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    All Genres
-                  </button>
-                  {sortedGenres.map((g) => (
-                     <button
-                       key={g}
-                       onClick={() => setActiveGenre(g)}
-                       className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                         activeGenre === g
-                           ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50'
-                           : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
-                       }`}
-                     >
-                       {g}
-                     </button>
-                  ))}
-               </div>
-            </div>
-
-            {/* Sort Dropdown */}
-            <div className="shrink-0 relative w-fit">
-               <ArrowUpDown className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-               <select
-                 value={sortOption}
-                 onChange={(e) => setSortOption(e.target.value as SortOption)}
-                 className="w-auto pl-8 pr-7 py-1.5 bg-slate-900 border border-slate-800 rounded-full text-xs font-medium text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-700 appearance-none cursor-pointer"
-               >
-                 <option value="SCORE_DESC">分數(高)</option>
-                 <option value="SCORE_ASC">分數(低)</option>
-                 <option value="DATE_DESC">日期(新)</option>
-                 <option value="DATE_ASC">日期(舊)</option>
-                 <option value="PLAYTIME_DESC">時數(長)</option>
-                 <option value="PLAYTIME_ASC">時數(短)</option>
-               </select>
-               {/* Custom dropdown arrow to match theme */}
-               <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                 <div className="border-t-[3px] border-t-slate-400 border-x-[3px] border-x-transparent" />
-               </div>
-            </div>
-        </div>
-
-        {/* Empty State */}
-        {isLoading ? (
-          <div className="text-center py-20">
-             <div className="inline-block w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-             <p className="text-slate-400">Loading your games...</p>
-          </div>
-        ) : filteredGames.length === 0 && (
-          <div className="text-center py-20 bg-slate-900/30 rounded-3xl border-2 border-dashed border-slate-800">
-            <div className="bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Layers className="w-8 h-8 text-slate-600" />
-            </div>
-            <h3 className="text-xl font-bold text-white mb-2">
-              {!user ? 'Please log in' : 'No games found'}
-            </h3>
-            <p className="text-slate-400 max-w-sm mx-auto mb-6">
-              {!user 
-                ? "Log in to start saving your game ratings to the cloud."
-                : games.length === 0 
-                  ? "Start building your collection by adding a new game rating."
-                  : "No games match your selected filters."}
-            </p>
-            {games.length === 0 && user && (
-              <div className="flex justify-center gap-4">
-                <button
-                  onClick={() => setIsModalOpen(true)}
-                  className="text-indigo-400 hover:text-indigo-300 font-medium text-sm px-4 py-2"
-                >
-                  + Rate your first game
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredGames.map((game) => (
-            <GameCard key={game.id} game={game} onDelete={handleDeleteGame} onEdit={handleEditGame} />
-          ))}
-        </div>
-
-        <div className="mt-10 pt-6 border-t border-slate-800/50 flex flex-col items-center justify-center gap-2">
-           <span className="text-[10px] text-slate-600 font-mono">
-             GameRank v{APP_VERSION}
-           </span>
-        </div>
-      </main>
-
-      <AddGameModal
-        isOpen={isModalOpen}
-        onClose={closeModal}
-        onSave={handleSaveGame}
-        initialData={editingGame}
+    <ThemeContext.Provider value={theme}>
+      <View
+        theme={theme}
+        user={user}
+        hasGames={games.length > 0}
+        isLoading={isLoading}
+        isSaving={pendingWrites > 0}
+        version={APP_VERSION}
+        stats={stats}
+        tabs={platformTabs.tabs}
+        tabCounts={platformTabs.counts}
+        activeTab={activeTab}
+        genres={sortedGenres}
+        activeGenre={activeGenre}
+        sortOption={sortOption}
+        sortLabels={SORT_LABELS}
+        games={filteredGames}
+        onSelectTab={selectTab}
+        onSelectGenre={setActiveGenre}
+        onSort={setSortOption}
+        onAdd={() => setIsModalOpen(true)}
+        onEdit={handleEditGame}
+        onDelete={handleDeleteGame}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+        onExport={handleBackupJSON}
+        onImport={() => fileInputRef.current?.click()}
+        onCloudBackup={handleBackupToFirestore}
+        onCloudRestore={handleRestoreFromFirestore}
+        onToggleTheme={toggleTheme}
       />
-      
-      <ConfirmModal 
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-        onConfirm={confirmModal.onConfirm}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        isAlert={confirmModal.isAlert}
+      <input type="file" ref={fileInputRef} onChange={handleRestoreJSON} accept=".json" hidden />
+
+      {isModalOpen && <AddGameModal isOpen onClose={closeModal} onSave={handleSaveGame} initialData={editingGame} />}
+
+      <ConfirmModal
+        isOpen={dialog.isOpen}
+        onClose={() => setDialog(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={dialog.onConfirm}
+        title={dialog.title}
+        message={dialog.message}
+        isAlert={dialog.isAlert}
       />
-    </div>
+    </ThemeContext.Provider>
   );
 };
 

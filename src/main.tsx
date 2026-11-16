@@ -1,8 +1,14 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-// CSS is loaded via index.html <style> and Tailwind CDN for Preview compatibility
-// import './index.css'; 
+import 'nes.css/css/nes.min.css';
+import './index.css';
+import './themes/nes.css';
+import './themes/arcade.css';
+import { applyTheme, loadTheme } from './theme';
+
+// 在第一次繪製前就套上使用者上次選的主題
+applyTheme(loadTheme());
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
