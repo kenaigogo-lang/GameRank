@@ -14,6 +14,28 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
+/** 建置時沒拿到的必要設定（Vercel 環境變數漏設或名稱打錯時會出現） */
+export const missingFirebaseConfig: string[] = Object.entries({
+  VITE_FIREBASE_API_KEY: firebaseConfig.apiKey,
+  VITE_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain,
+  VITE_FIREBASE_PROJECT_ID: firebaseConfig.projectId,
+  VITE_FIREBASE_STORAGE_BUCKET: firebaseConfig.storageBucket,
+  VITE_FIREBASE_APP_ID: firebaseConfig.appId,
+}).filter(([, value]) => !value).map(([name]) => name);
+
+/** 把 Firebase 的錯誤翻成看得懂、知道去哪裡修的訊息 */
+export const describeFirebaseError = (error: any): string => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || error || '');
+  if (/projectId/i.test(message)) return '網站缺少 Firebase 專案 ID（Vercel 的 VITE_FIREBASE_PROJECT_ID 沒設定），請補上後重新部署。';
+  if (/API key|api-key|blocked/i.test(message) || code.includes('api-key')) {
+    return `Firebase 的網頁金鑰無效，或它的「API 限制」擋住了資料庫（${message}）。請檢查 Vercel 的 VITE_FIREBASE_API_KEY，以及 Google Cloud 上這把金鑰的限制。`;
+  }
+  if (code.includes('permission-denied')) return 'Firestore 的權限規則拒絕讀取。請到 Firebase Console → Firestore Database → Rules 檢查規則。';
+  if (code.includes('unavailable') || /network|fetch/i.test(message)) return '連不上 Firebase，請檢查網路後重新整理。';
+  return message || '未知錯誤';
+};
+
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
@@ -127,8 +149,9 @@ export const getUserBackupGames = async (userId: string): Promise<Game[]> => {
       } as Game;
     });
   } catch (error) {
+    // 讀取失敗一定要讓畫面知道，不能當成「沒有資料」，否則使用者可能拿空清單去覆蓋雲端
     console.error('Error fetching user backup games', error);
-    return [];
+    throw error;
   }
 };
 
@@ -136,6 +159,9 @@ export const saveUserBackupGames = async (userId: string, games: Game[]): Promis
   try {
     const backupCollection = collection(db, 'users', userId, 'backups');
     const existingBackupDocs = await getDocs(backupCollection);
+    if (games.length === 0 && !existingBackupDocs.empty) {
+      throw new Error('目前的清單是空的；為了避免把雲端存檔整個清掉，已取消這次備份。');
+    }
     const batch = writeBatch(db);
 
     existingBackupDocs.docs.forEach((backupDoc) => {
