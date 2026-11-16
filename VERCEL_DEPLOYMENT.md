@@ -4,6 +4,10 @@ GameRank 連著 GitHub，push 到 `main` 就會自動部署正式站；其他分
 
 ## 環境變數（Vercel → 專案 → Settings → Environment Variables）
 
+**每個變數都要勾選 Production 與 Preview 兩個環境**（本機用 `vercel dev` 的話再勾 Development）。只勾 Production 的話，PR 的預覽網址會讀不到，封面搜尋與 AI 判斷都會失敗。改完變數要重新部署才會生效。
+
+想確認目前部署讀到哪些設定，打開 `/api/health?check=1`（例如 `https://<預覽網址>/api/health?check=1`），會逐項實際連線測試，金鑰只顯示末 4 碼。
+
 ### 前端用（會打包進網頁）
 
 Firebase 的網頁設定本來就是公開的，安全性靠 Firebase 權限規則，不靠隱藏這些值。
