@@ -48,6 +48,9 @@ Return ONLY the category name. If it fits multiple, pick the most dominant one. 
     const detail = await res.json().catch(() => null);
     lastError = detail?.error?.message || `HTTP ${res.status}`;
     console.warn(`genre: ${model} failed`, res.status, lastError);
+    if (/credit|billing|prepay/i.test(lastError)) {
+      throw new HttpError(402, 'Gemini 金鑰所屬的專案帳單額度用完了。請到 Google AI Studio 為該專案儲值，或改用沒有開帳單的專案重新建立金鑰（免費額度）');
+    }
     if (res.status === 400 || res.status === 401 || res.status === 403) {
       throw new HttpError(502, `Gemini 拒絕了這把金鑰，請確認 GEMINI_API_KEY 是否正確（${lastError}）`);
     }
