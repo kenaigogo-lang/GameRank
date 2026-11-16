@@ -3,6 +3,14 @@ import { env, fetchWithTimeout, handle, HttpError, json, requireUser } from './_
 // 與前端 src/types.ts 的 GENRE_OPTIONS 保持一致
 const GENRES = ['角色扮演', '動作冒險', '類魂', '互動式電影', 'Roguelike', '類惡魔城', '恐怖', '音樂/節奏', '策略/模擬', '視覺小說', '休閒益智', '運動競速', '射擊', '格鬥'];
 
+const latestFlashModel = async (key: string): Promise<string | null> => {
+  const res = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', { headers: { 'x-goog-api-key': key } }).catch(() => null);
+  if (!res?.ok) return null;
+  const names: string[] = ((await res.json()).models || []).map((m: { name: string }) => m.name.replace('models/', ''));
+  const version = (n: string) => Number(n.match(/^gemini-([\d.]+)-flash$/)?.[1] ?? 0);
+  return names.filter(n => version(n) > 0).sort((a, b) => version(b) - version(a))[0] ?? null;
+};
+
 /** 用 Gemini 判斷遊戲類型。直接呼叫 REST API，前端不必再載入整包 Gemini SDK。 */
 export const GET = handle(async (request: Request) => {
   await requireUser(request);
@@ -18,7 +26,9 @@ Return ONLY the category name. If it fits multiple, pick the most dominant one. 
   // Google 會陸續停用舊模型（gemini-2.5-flash 已預定停用）。指定的模型找不到時，改用會跟著更新的 flash 別名。
   const models = [...new Set([env('GEMINI_MODEL'), 'gemini-flash-latest', 'gemini-2.5-flash'].filter(Boolean) as string[])];
   let lastError = '';
-  for (const model of models) {
+  let discovered = false;
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
     const res = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       {
@@ -43,6 +53,12 @@ Return ONLY the category name. If it fits multiple, pick the most dominant one. 
     }
     if (res.status === 429) throw new HttpError(429, 'Gemini 的免費額度暫時用完了，請稍後再試');
     if (res.status !== 404) break;
+    // 預設模型都停用了：向 Google 查目前可用的模型，挑版本最新的 Flash 再試一次
+    if (i === models.length - 1 && !discovered) {
+      discovered = true;
+      const latest = await latestFlashModel(key);
+      if (latest && !models.includes(latest)) models.push(latest);
+    }
   }
   throw new HttpError(502, `AI 服務暫時無法使用（${lastError}）`);
 });
