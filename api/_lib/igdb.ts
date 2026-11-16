@@ -4,15 +4,20 @@ import { env, fetchWithTimeout } from './auth.js';
 
 const HAS_CJK = /[\u3400-\u9fff]/;
 
-// 中文名稱先用維基百科的跨語言連結換成英文，IGDB 對中文支援很弱
-export const englishTitle = async (query: string): Promise<string | null> => {
-  const url = `https://zh.wikipedia.org/w/api.php?action=query&format=json&prop=langlinks&lllang=en&redirects=1&titles=${encodeURIComponent(query)}`;
+const wikiEnglish = async (params: string): Promise<string | null> => {
+  const url = `https://zh.wikipedia.org/w/api.php?action=query&format=json&prop=langlinks&lllang=en&redirects=1&${params}`;
   const res = await fetchWithTimeout(url, { headers: { 'user-agent': 'GameRank/1.0 (cover search)' } }, 5000);
   if (!res.ok) return null;
-  const pages = (await res.json()).query?.pages || {};
-  const page = Object.values(pages)[0] as { langlinks?: { '*': string }[] } | undefined;
-  return page?.langlinks?.[0]?.['*'] ?? null;
+  const pages = Object.values((await res.json()).query?.pages || {}) as { index?: number; langlinks?: { '*': string }[] }[];
+  pages.sort((x, y) => (x.index ?? 0) - (y.index ?? 0));
+  return pages.find(p => p.langlinks?.length)?.langlinks?.[0]?.['*'] ?? null;
 };
+
+// 中文名稱先用維基百科的跨語言連結換成英文，IGDB 對中文支援很弱。
+// 條目名稱不完全一樣時（空格、簡繁寫法、副標題），改用維基百科搜尋找最接近的條目。
+export const englishTitle = async (query: string): Promise<string | null> =>
+  (await wikiEnglish(`titles=${encodeURIComponent(query)}`)) ||
+  (await wikiEnglish(`generator=search&gsrlimit=3&gsrsearch=${encodeURIComponent(query)}`));
 
 /** 給 IGDB 用的搜尋字：中文會先嘗試換成英文 */
 export const igdbSearchTerm = async (query: string) =>
