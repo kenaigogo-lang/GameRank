@@ -1,9 +1,9 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, collection, getDocs, deleteDoc, doc, query, where, getDoc, setDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, deleteDoc, doc, query, where, getDoc, setDoc, writeBatch } from 'firebase/firestore/lite';
 import { Game, Platform } from '../types';
 
-// Firebase config from environment variables
+// Firebase 公開設定（這些值本來就會出現在前端，不是秘密）
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -14,7 +14,7 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
@@ -185,6 +185,15 @@ export const saveGameRecord = async (userId: string, game: Game, isNew: boolean)
   await settleEither('saveGameRecord', [
     setDoc(doc(db, 'users', userId, 'backups', id), { ...game, updatedAt: now, ...(isNew ? { backupOrder: -now } : {}) }, { merge: true }),
     setDoc(doc(db, 'games', id), { ...data, userId }, { merge: true }),
+  ]);
+};
+
+/** 只更新封面網址（搬移封面用），不碰其他欄位 */
+export const updateGameCover = async (userId: string, id: string, imageUrl: string): Promise<void> => {
+  const now = Date.now();
+  await settleEither('updateGameCover', [
+    setDoc(doc(db, 'users', userId, 'backups', id), { imageUrl, updatedAt: now }, { merge: true }),
+    setDoc(doc(db, 'games', id), { imageUrl, userId }, { merge: true }),
   ]);
 };
 

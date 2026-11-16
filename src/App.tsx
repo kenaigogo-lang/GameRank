@@ -6,7 +6,8 @@ import { ArcadeView } from './views/ArcadeView';
 import { ThemeContext, ThemeName, applyTheme, loadTheme } from './theme';
 import { AddGameModal } from './components/AddGameModal';
 import { ConfirmModal } from './components/ConfirmModal';
-import { signInWithGoogle, logout, getGames, getUserBackupGames, saveUserBackupGames, saveGameRecord, deleteGameRecord, newGameId, auth } from './services/firebase';
+import { signInWithGoogle, logout, getGames, getUserBackupGames, saveUserBackupGames, saveGameRecord, deleteGameRecord, updateGameCover, newGameId, auth } from './services/firebase';
+import { deleteCoverFile, isInlineCover, prepareCover, storageUnavailableReason, uploadCover } from './services/covers';
 import { User, onAuthStateChanged } from 'firebase/auth';
 
 const APP_VERSION = '202611150000';
@@ -53,6 +54,7 @@ const App = () => {
   // 背景中尚未完成的雲端寫入數量
   const [pendingWrites, setPendingWrites] = useState(0);
   const [theme, setTheme] = useState<ThemeName>(loadTheme);
+  const [migration, setMigration] = useState<{ done: number; total: number } | null>(null);
 
   const [dialog, setDialog] = useState<DialogState>({ isOpen: false, title: '', message: '', onConfirm: () => {}, isAlert: false });
 
@@ -118,6 +120,22 @@ const App = () => {
     }
   }, [showAlert]);
 
+  /** 封面先上傳到 Storage（可用時），再寫入這一筆資料；換掉的舊封面檔順手刪除 */
+  const persistGame = useCallback(async (uid: string, game: Game, isNew: boolean, previousCover?: string) => {
+    const imageUrl = await prepareCover(uid, game.id, game.imageUrl);
+    const toSave = imageUrl === game.imageUrl ? game : { ...game, imageUrl };
+    try {
+      await saveGameRecord(uid, toSave, isNew);
+    } catch (error) {
+      if (toSave !== game) void deleteCoverFile(imageUrl);
+      throw error;
+    }
+    if (toSave !== game) {
+      setGames(prev => prev.map(g => (g.id === game.id && g.imageUrl === game.imageUrl ? { ...g, imageUrl } : g)));
+    }
+    if (previousCover && previousCover !== toSave.imageUrl) void deleteCoverFile(previousCover);
+  }, []);
+
   const handleLogin = async () => {
     try {
       await signInWithGoogle();
@@ -164,7 +182,7 @@ const App = () => {
       setGames(prev => prev.map(g => (g.id === previous.id ? updated : g)));
       closeModal();
       void syncInBackground(
-        () => saveGameRecord(uid, updated, false),
+        () => persistGame(uid, updated, false, previous.imageUrl),
         () => setGames(prev => prev.map(g => (g.id === previous.id ? previous : g))),
         `修改《${input.title}》`
       );
@@ -173,7 +191,7 @@ const App = () => {
       setGames(prev => [created, ...prev]);
       closeModal();
       void syncInBackground(
-        () => saveGameRecord(uid, created, true),
+        () => persistGame(uid, created, true),
         () => setGames(prev => prev.filter(g => g.id !== created.id)),
         `新增《${input.title}》`
       );
@@ -202,7 +220,10 @@ const App = () => {
         const uid = userRef.current?.uid;
         if (!uid) return;
         void syncInBackground(
-          () => deleteGameRecord(uid, id),
+          async () => {
+            await deleteGameRecord(uid, id);
+            void deleteCoverFile(target.imageUrl);
+          },
           () => setGames(prev => {
             if (prev.some(g => g.id === id)) return prev;
             const next = prev.slice();
@@ -214,6 +235,39 @@ const App = () => {
       },
     });
   }, [syncInBackground]);
+
+  const inlineCoverCount = useMemo(() => games.filter(g => isInlineCover(g.imageUrl)).length, [games]);
+
+  /** 把還存在資料庫裡的 base64 封面逐張搬到 Storage；任何一張失敗就停下，已搬的保留 */
+  const handleMigrateCovers = async () => {
+    if (!user || migration) return;
+    const uid = user.uid;
+    const targets = gamesRef.current.filter(g => isInlineCover(g.imageUrl));
+    let done = 0;
+    setMigration({ done, total: targets.length });
+    setPendingWrites(n => n + 1);
+    try {
+      for (const game of targets) {
+        const url = await uploadCover(uid, game.id, game.imageUrl!);
+        try {
+          await updateGameCover(uid, game.id, url);
+        } catch (error) {
+          void deleteCoverFile(url);
+          throw error;
+        }
+        setGames(prev => prev.map(g => (g.id === game.id && g.imageUrl === game.imageUrl ? { ...g, imageUrl: url } : g)));
+        done += 1;
+        setMigration({ done, total: targets.length });
+      }
+      showAlert('封面搬移完成', `已把 ${done} 張封面搬到 Firebase Storage，下次開站會快很多。`);
+    } catch (error: any) {
+      console.error('Cover migration stopped', error);
+      showAlert('封面搬移中斷', `已完成 ${done}／${targets.length} 張。\n\n${error?.message || '請稍後再試。'}\n\n還沒搬的封面不受影響，照常顯示。`);
+    } finally {
+      setMigration(null);
+      setPendingWrites(n => n - 1);
+    }
+  };
 
   const handleBackupJSON = () => {
     const jsonContent = JSON.stringify(games, null, 2);
@@ -409,11 +463,24 @@ const App = () => {
   }, []);
 
   const View = theme === 'arcade' ? ArcadeView : NesView;
+  const blockedReason = storageUnavailableReason();
+  const coverNotice = user && inlineCoverCount > 0 ? (
+    <>
+      <p>
+        有 {inlineCoverCount} 張封面還存在資料庫裡，每次開站都要整包下載。搬到 Firebase Storage 後開站會快很多，原本的封面不會遺失。
+        {blockedReason && !migration && <><br /><b>目前無法搬移：{blockedReason}。</b></>}
+      </p>
+      <button type="button" className={theme === 'nes' ? 'nes-btn is-warning sm' : 'btn yl'} onClick={handleMigrateCovers} disabled={!!migration}>
+        {migration ? `搬移中 ${migration.done}／${migration.total}` : '搬移封面'}
+      </button>
+    </>
+  ) : null;
 
   return (
     <ThemeContext.Provider value={theme}>
       <View
         theme={theme}
+        notice={coverNotice}
         user={user}
         hasGames={games.length > 0}
         isLoading={isLoading}

@@ -28,6 +28,7 @@ export const NesView = (p: ViewProps) => {
       </header>
 
       <main className="wrap">
+        {p.notice && <section className="nes-container is-rounded notice-bar">{p.notice}</section>}
         <section className="nes-container with-title is-rounded sts">
           <p className="title">PLAYER STATUS</p>
           <dl className="stg" aria-label={scopeLabel(p.activeTab)}>

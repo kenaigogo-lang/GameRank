@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { User } from 'firebase/auth';
 import { Game, Platform, SortOption } from '../types';
 import { ThemeName } from '../theme';
@@ -5,6 +6,8 @@ import { ThemeName } from '../theme';
 /** 兩套主題畫面共用的資料與操作；畫面本身只負責排版 */
 export interface ViewProps {
   theme: ThemeName;
+  /** 頁面上方的提示列（例如封面搬移），沒有就不顯示 */
+  notice?: ReactNode;
   user: User | null;
   hasGames: boolean;
   isLoading: boolean;
