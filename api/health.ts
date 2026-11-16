@@ -5,7 +5,7 @@ import { generateText } from './_lib/gemini.js';
  * 設定檢查頁。
  * - /api/health：列出伺服器端各項設定有沒有設（金鑰只顯示末 4 碼，方便對照是哪一把）。
  * - /api/health?check=1：用這些設定實際連一次各個外部服務，回報成功或失敗原因。
- *   只做免費或極少量的呼叫（Google 搜尋會用掉每日 100 次額度中的 1 次）。
+ *   只做免費或極少量的呼叫：Google 搜尋用掉每日 100 次中的 1 次，Gemini 用掉免費額度中的 1 次。
  */
 
 const tail = (value?: string) => (value ? `…${value.slice(-4)}` : null);

@@ -58,7 +58,8 @@ export const generateText = async (prompt: string): Promise<GeminiResult> => {
     console.warn(`gemini: ${model} failed`, res.status, lastError);
 
     // 金鑰或帳單問題換模型也沒用，直接回報
-    if (/credit|billing|prepay/i.test(lastError)) {
+    // 只有「預付餘額用完」才是帳單問題。免費額度用完的 429 訊息也會提到 billing，那種要換模型繼續試
+    if (res.status === 402 || /prepay|credits are depleted/i.test(lastError)) {
       throw new HttpError(402, 'Gemini 金鑰所屬的專案帳單額度用完了。請到 Google AI Studio 為該專案儲值，或改用沒有開帳單的專案重新建立金鑰（免費額度）');
     }
     if (res.status === 400 || res.status === 401 || res.status === 403) {
