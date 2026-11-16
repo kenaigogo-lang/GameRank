@@ -3,8 +3,10 @@ import { igdbQuery, igdbSearchTerm, quote } from './igdb.js';
 /** 與前端 src/types.ts 的 GENRE_OPTIONS 保持一致 */
 export const GENRES = ['角色扮演', '動作冒險', '類魂', '互動式電影', 'Roguelike', '類惡魔城', '恐怖', '音樂/節奏', '策略/模擬', '視覺小說', '休閒益智', '運動競速', '射擊', '格鬥'] as const;
 
-interface IgdbGame {
+export interface IgdbGame {
   name: string;
+  total_rating_count?: number;
+  first_release_date?: number;
   genres?: { name: string }[];
   themes?: { name: string }[];
   keywords?: { name: string }[];
@@ -53,16 +55,23 @@ export const mapIgdbGenres = (game: IgdbGame): string[] => {
   return result.slice(0, MAX_GENRES);
 };
 
+/** 搜尋 IGDB，回傳候選遊戲（評分人數多的、名稱相符的排前面） */
+export const searchIgdbGames = async (title: string): Promise<{ term: string; games: IgdbGame[] }> => {
+  const term = await igdbSearchTerm(title);
+  const games = (await igdbQuery<IgdbGame[]>(
+    'games',
+    `search ${quote(term)}; fields name, total_rating_count, first_release_date, genres.name, themes.name, keywords.name; where version_parent = null; limit 15;`
+  )) || [];
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]/g, '');
+  const exact = (x: IgdbGame) => norm(x.name) === norm(term);
+  // 同名遊戲可能有好幾款（例如 1980 年代也有叫 Hades 的遊戲），以評分人數判斷哪個才是大家說的那款
+  return { term, games: [...games].sort((a, b) => Number(exact(b)) - Number(exact(a)) || (b.total_rating_count ?? 0) - (a.total_rating_count ?? 0)) };
+};
+
 /** 用 IGDB 查遊戲類型；找不到或沒設定 IGDB 時回傳 null */
 export const genresFromIgdb = async (title: string): Promise<{ genres: string[]; matched: string } | null> => {
-  const term = await igdbSearchTerm(title);
-  const games = await igdbQuery<IgdbGame[]>(
-    'games',
-    `search ${quote(term)}; fields name, genres.name, themes.name, keywords.name; where version_parent = null; limit 10;`
-  );
-  if (!games?.length) return null;
-  const exact = games.find(x => x.name.toLowerCase() === term.toLowerCase());
-  for (const game of exact ? [exact, ...games] : games) {
+  const { games } = await searchIgdbGames(title);
+  for (const game of games) {
     const genres = mapIgdbGenres(game);
     if (genres.length) return { genres, matched: game.name };
   }

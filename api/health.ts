@@ -1,6 +1,6 @@
 import { env, fetchWithTimeout, HttpError, json } from './_lib/auth.js';
 import { generateText } from './_lib/gemini.js';
-import { genresFromIgdb } from './_lib/genres.js';
+import { genresFromIgdb, mapIgdbGenres, searchIgdbGames } from './_lib/genres.js';
 
 /**
  * 設定檢查頁。
@@ -104,7 +104,25 @@ const checks = async (): Promise<Record<string, Check>> => {
 };
 
 export const GET = async (request: Request) => {
-  const deep = new URL(request.url).searchParams.get('check') === '1';
+  const params = new URL(request.url).searchParams;
+  // /api/health?igdb=遊戲名稱：看 IGDB 原始的類型資料與對應結果（調整對應規則用）
+  const igdbTitle = params.get('igdb');
+  if (igdbTitle) {
+    const { term, games } = await searchIgdbGames(igdbTitle.slice(0, 100));
+    return json({
+      term,
+      candidates: games.slice(0, 5).map(g => ({
+        name: g.name,
+        year: g.first_release_date ? new Date(g.first_release_date * 1000).getUTCFullYear() : null,
+        ratings: g.total_rating_count ?? 0,
+        genres: (g.genres || []).map(x => x.name),
+        themes: (g.themes || []).map(x => x.name),
+        keywords: (g.keywords || []).map(x => x.name).slice(0, 60),
+        mapped: mapIgdbGenres(g),
+      })),
+    });
+  }
+  const deep = params.get('check') === '1';
   const body: Record<string, unknown> = { settings: settings() };
   if (deep) body.checks = await checks();
   else body.hint = '加上 ?check=1 會實際連線測試每個服務';
