@@ -182,4 +182,7 @@ html[data-theme="arcade"] {
   .selw select { width: 100%; }
   .seg button.on.p-PC { border-color: var(--fg); color: var(--fg); }
   .notice { color: var(--yel); margin: 0; }
+  .notice-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; border: 1px dashed var(--yel); padding: 10px 14px; font: 13px/1.7 var(--tc); color: var(--fg); }
+  .notice-bar p { flex: 1 1 280px; }
+  .notice-bar b { color: var(--yel); }
 }

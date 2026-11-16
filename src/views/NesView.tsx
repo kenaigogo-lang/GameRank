@@ -28,6 +28,7 @@ export const NesView = (p: ViewProps) => {
       </header>
 
       <main className="wrap">
+        {p.notice && <section className="nes-container is-rounded notice-bar">{p.notice}</section>}
         <section className="nes-container with-title is-rounded sts">
           <p className="title">PLAYER STATUS</p>
           <dl className="stg" aria-label={scopeLabel(p.activeTab)}>
@@ -74,7 +75,7 @@ export const NesView = (p: ViewProps) => {
             <h3>{empty.title}</h3>
             <p>{empty.text}</p>
             {!p.user && <button type="button" className="nes-btn is-warning" onClick={p.onLogin}>Google 登入</button>}
-            {p.user && !p.hasGames && <button type="button" className="nes-btn is-primary" onClick={p.onAdd}>＋ 新增第一款遊戲</button>}
+            {p.user && !p.hasGames && !p.loadFailed && <button type="button" className="nes-btn is-primary" onClick={p.onAdd}>＋ 新增第一款遊戲</button>}
           </div>
         ) : (
           <div className="grid">

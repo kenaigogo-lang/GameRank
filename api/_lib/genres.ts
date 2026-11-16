@@ -1,0 +1,96 @@
+import { igdbQuery, igdbSearchTerm, quote } from './igdb.js';
+
+/** 與前端 src/types.ts 的 GENRE_OPTIONS 保持一致 */
+export const GENRES = ['角色扮演', '動作冒險', '類魂', '互動式電影', 'Roguelike', '類惡魔城', '恐怖', '音樂/節奏', '策略/模擬', '視覺小說', '休閒益智', '運動競速', '射擊', '格鬥'] as const;
+
+export interface IgdbGame {
+  name: string;
+  total_rating_count?: number;
+  first_release_date?: number;
+  genres?: { name: string }[];
+  themes?: { name: string }[];
+  keywords?: { name: string }[];
+}
+
+/**
+ * IGDB 的類型（genres）、主題（themes）、關鍵字（keywords）對應到 GameRank 的 14 個類型。
+ * 由最具體的往下排，例如「類魂」比「動作冒險」更能描述艾爾登法環。
+ */
+const RULES: { genre: (typeof GENRES)[number]; genres?: RegExp; themes?: RegExp; keywords?: RegExp }[] = [
+  { genre: '類魂', keywords: /^souls-?like$|soulsborne/i },
+  { genre: '類惡魔城', keywords: /^metroidvania$/i },
+  { genre: 'Roguelike', keywords: /^rogue-?(like|lite)$/i },
+  { genre: '互動式電影', keywords: /^interactive (movie|drama|film)$|^cinematic adventure$/i },
+  { genre: '恐怖', themes: /^horror$/i, keywords: /^survival horror$|^psychological horror$/i },
+  { genre: '視覺小說', genres: /^visual novel$/i },
+  { genre: '音樂/節奏', genres: /^music$/i, keywords: /^rhythm( game)?$/i },
+  { genre: '格鬥', genres: /^fighting$/i },
+  { genre: '射擊', genres: /^shooter$/i },
+  { genre: '運動競速', genres: /^(sport|racing)$/i },
+  { genre: '策略/模擬', genres: /strategy|^tactical$|^simulator$|^moba$/i, themes: /^(4x|business)/i },
+  { genre: '休閒益智', genres: /^puzzle$|quiz|card & board|^pinball$/i },
+  { genre: '角色扮演', genres: /role-playing/i },
+  { genre: '動作冒險', genres: /^adventure$|^platform$|hack and slash/i, themes: /^action$/i },
+];
+
+const MAX_GENRES = 3;
+
+export const mapIgdbGenres = (game: IgdbGame): string[] => {
+  const names = (list?: { name: string }[]) => (list || []).map(x => x.name);
+  const g = names(game.genres), t = names(game.themes), k = names(game.keywords);
+  const hits: string[] = RULES.filter(r =>
+    (r.genres && g.some(n => r.genres!.test(n))) ||
+    (r.themes && t.some(n => r.themes!.test(n))) ||
+    (r.keywords && k.some(n => r.keywords!.test(n)))
+  ).map(r => r.genre as string);
+
+  // 互動式電影：IGDB 沒有這個類型。只有冒險（或點擊式冒險）類型、主題是劇情／驚悚／懸疑的遊戲（例如底特律：變人）
+  const gameplay = g.filter(n => !/^indie$/i.test(n));
+  if (!hits.includes('互動式電影') && gameplay.length > 0 && gameplay.every(n => /^adventure$|^point-and-click$/i.test(n)) && t.some(n => /^(drama|thriller|mystery)$/i.test(n))) {
+    hits.unshift('互動式電影');
+  }
+
+  // 解謎常是大型冒險遊戲的附屬要素（例如薩爾達），只有解謎是主要玩法時才算「休閒益智」
+  if (g.some(n => /^adventure$|role-playing|^platform$|^shooter$|hack and slash/i.test(n))) {
+    const i = hits.indexOf('休閒益智');
+    if (i >= 0) hits.splice(i, 1);
+  }
+
+  // IGDB 把多數賽車、運動遊戲也標成 Simulator，這時不算「策略/模擬」
+  let result = hits.includes('運動競速') && !g.some(n => /strategy|tactical|moba/i.test(n)) ? hits.filter(h => h !== '策略/模擬') : hits;
+
+  // 「動作冒險」太籠統：只有 Action 主題（幾乎每款動作遊戲都有）時，有其他類型就不加；
+  // 來自 Adventure／Platform 等類型時，已有兩個以上更具體的類型才不加
+  const specific = result.filter(h => h !== '動作冒險');
+  const adventureByGenre = g.some(n => /^adventure$|^platform$|hack and slash/i.test(n));
+  if (specific.length >= 2 || (specific.length >= 1 && !adventureByGenre) || result.includes('互動式電影')) result = specific;
+  return result.slice(0, MAX_GENRES);
+};
+
+/** 搜尋 IGDB，回傳候選遊戲（評分人數多的、名稱相符的排前面） */
+export const searchIgdbGames = async (title: string): Promise<{ term: string; games: IgdbGame[] }> => {
+  const term = await igdbSearchTerm(title);
+  const games = (await igdbQuery<IgdbGame[]>(
+    'games',
+    `search ${quote(term)}; fields name, total_rating_count, first_release_date, genres.name, themes.name, keywords.name; where version_parent = null; limit 15;`
+  )) || [];
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]/g, '');
+  const exact = (x: IgdbGame) => norm(x.name) === norm(term);
+  // 名稱裡的數字（代數）要對得上，例如「地平線 5」不能選到 6 代
+  const numbers = `${title} ${term}`.match(/\d+/g) || [];
+  const numbersMatch = (x: IgdbGame) => numbers.every(n => new RegExp(`(^|\\D)${n}(\\D|$)`).test(x.name));
+  // 合輯、同捆包放後面
+  const isMain = (x: IgdbGame) => !/\b(double pack|bundle|collection|pack)\b/i.test(x.name);
+  // 同名遊戲可能有好幾款（例如 1980 年代也有叫 Hades 的遊戲），以評分人數判斷哪個才是大家說的那款
+  return { term, games: [...games].sort((a, b) => Number(exact(b)) - Number(exact(a)) || Number(numbersMatch(b)) - Number(numbersMatch(a)) || Number(isMain(b)) - Number(isMain(a)) || (b.total_rating_count ?? 0) - (a.total_rating_count ?? 0)) };
+};
+
+/** 用 IGDB 查遊戲類型；找不到或沒設定 IGDB 時回傳 null */
+export const genresFromIgdb = async (title: string): Promise<{ genres: string[]; matched: string } | null> => {
+  const { games } = await searchIgdbGames(title);
+  for (const game of games) {
+    const genres = mapIgdbGenres(game);
+    if (genres.length) return { genres, matched: game.name };
+  }
+  return null;
+};

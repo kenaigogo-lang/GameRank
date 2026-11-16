@@ -36,6 +36,7 @@ export const ArcadeView = (p: ViewProps) => {
       </header>
 
       <main className="wrap">
+        {p.notice && <section className="notice-bar">{p.notice}</section>}
         <div className="sel" role="tablist" aria-label="平台">
           <span className="lb">SELECT</span>
           {p.tabs.map(tab => (
@@ -81,7 +82,7 @@ export const ArcadeView = (p: ViewProps) => {
               <h3>{empty.title}</h3>
               <p>{empty.text}</p>
               {!p.user && <button type="button" className="btn cy" onClick={p.onLogin}>Google 登入</button>}
-              {p.user && !p.hasGames && <button type="button" className="btn yl" onClick={p.onAdd}>＋ 新增第一款遊戲</button>}
+              {p.user && !p.hasGames && !p.loadFailed && <button type="button" className="btn yl" onClick={p.onAdd}>＋ 新增第一款遊戲</button>}
             </div>
           ) : (
             <ol>

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Platform, Game, GameInput, GENRE_OPTIONS } from '../types';
-import { getGameGenre } from '../services/geminiService';
-import { searchUnifiedGames, UnifiedGame } from '../services/igdbService';
+import { fetchGenre, fetchImageViaProxy, searchCovers, UnifiedGame } from '../services/api';
 import { useUi } from '../theme';
 
 interface AddGameModalProps {
@@ -86,6 +85,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
   const [notice, setNotice] = useState('');
 
   const [isGettingInfo, setIsGettingInfo] = useState(false);
+  const [genreMessage, setGenreMessage] = useState('');
 
   const [isTagSelectorOpen, setIsTagSelectorOpen] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -95,6 +95,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
   const [searchResults, setSearchResults] = useState<UnifiedGame[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchFilter, setSearchFilter] = useState<SearchSource>('ALL');
+  const [searchError, setSearchError] = useState('');
 
   // Esc：先關子畫面，再關視窗
   useEffect(() => {
@@ -114,15 +115,22 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
   const handleGetInfo = async () => {
     if (!title) return;
     setIsGettingInfo(true);
-    const fetchedGenre = await getGameGenre(title);
-    if (fetchedGenre) {
-      const matched = GENRE_OPTIONS.find(g => g === fetchedGenre);
-      if (matched) setSelectedGenres([matched]);
-      else setNotice(`AI 回傳的類型「${fetchedGenre}」不在清單裡，請手動選擇。`);
-    } else {
-      setNotice('AI 自動判斷目前無法使用，請手動選擇類型。');
+    setGenreMessage('');
+    try {
+      const { genres, source, matched } = await fetchGenre(title);
+      const valid = GENRE_OPTIONS.filter(g => genres.includes(g));
+      if (valid.length > 0) {
+        setSelectedGenres(prev => [...prev, ...valid.filter(g => !prev.includes(g))]);
+        const from = source === 'IGDB' ? `依 IGDB 資料${matched ? `（${matched}）` : ''}` : 'AI';
+        setGenreMessage(`${from}判斷為「${valid.join('、')}」，已幫你選上。`);
+      } else {
+        setGenreMessage('判斷不出這款遊戲的類型，請手動選擇。');
+      }
+    } catch (error: any) {
+      setGenreMessage(`自動判斷失敗：${error?.message || '請稍後再試'}`);
+    } finally {
+      setIsGettingInfo(false);
     }
-    setIsGettingInfo(false);
   };
 
   const toggleGenre = (genre: string) => {
@@ -196,9 +204,16 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
     setIsSearching(true);
     setSearchResults([]);
     setSearchFilter('ALL');
-    const results = await searchUnifiedGames(queryStr);
-    setSearchResults(results);
-    setIsSearching(false);
+    setSearchError('');
+    try {
+      const { results, failed } = await searchCovers(queryStr);
+      setSearchResults(results);
+      if (failed.length > 0) setSearchError(`${failed.join('、')} 這次沒有回應，結果可能不完整。`);
+    } catch (error: any) {
+      setSearchError(error?.message || '搜尋失敗，請稍後再試。');
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const openSearch = () => {
@@ -213,14 +228,24 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
   const selectSearchImage = async (url: string) => {
     setIsSearching(true);
     try {
-      // 直接縮圖一次就好（以往會先整張轉檔再縮一次）
-      const img = await loadImage(url, true);
+      // 先直接載入；圖片網站不允許跨網域讀取時，改由伺服器轉送
+      let img: HTMLImageElement;
+      try {
+        img = await loadImage(url, true);
+      } catch {
+        const objectUrl = URL.createObjectURL(await fetchImageViaProxy(url));
+        try {
+          img = await loadImage(objectUrl);
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      }
       setImageUrl(toCoverDataUrl(img));
       setNotice('');
       setIsSearchOpen(false);
     } catch (error) {
       console.error('Failed to use searched image', url, error);
-      setNotice('這張圖片的來源不允許下載，請換一張，或另存後用「上傳」。');
+      setNotice('這張圖片下載不了，請換一張，或另存後用「上傳」。');
       setIsSearchOpen(false);
     } finally {
       setIsSearching(false);
@@ -296,9 +321,10 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
             <div className="flh">
               <span>類型（可複選）</span>
               <button type="button" className="link" onClick={handleGetInfo} disabled={!title || isGettingInfo}>
-                {isGettingInfo ? <><span className="spin" /> 判斷中</> : 'AI 自動判斷'}
+                {isGettingInfo ? <><span className="spin" /> 判斷中</> : '自動判斷'}
               </button>
             </div>
+            {genreMessage && <p className="hint notice" role="status">{genreMessage}</p>}
             <div className="chips">
               {GENRE_OPTIONS.map(g => (
                 <button key={g} type="button" aria-pressed={selectedGenres.includes(g)} className={`chip${selectedGenres.includes(g) ? ' on' : ''}`} onClick={() => toggleGenre(g)}>{g}</button>
@@ -385,6 +411,8 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
                 <button type="submit" className={ui.btnInfo} disabled={isSearching || !searchQuery}>{isSearching ? <span className="spin" /> : '搜尋'}</button>
               </form>
 
+              {searchError && !isSearching && <p className="hint notice" role="alert">{searchError}</p>}
+
               {searchResults.length > 0 && !isSearching && (
                 <div className="chips">
                   <button type="button" className={`chip${searchFilter === 'ALL' ? ' on' : ''}`} onClick={() => setSearchFilter('ALL')}>全部 ({searchResults.length})</button>
@@ -407,7 +435,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
                   ))}
                 </div>
               ) : (
-                <p className="empty">{searchQuery ? '找不到結果。' : '輸入遊戲名稱開始搜尋。'}</p>
+                <p className="empty">{searchQuery ? (searchError ? '' : '找不到結果。') : '輸入遊戲名稱開始搜尋。'}</p>
               )}
             </div>
           </div>
