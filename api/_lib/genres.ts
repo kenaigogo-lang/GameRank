@@ -38,11 +38,23 @@ const MAX_GENRES = 3;
 export const mapIgdbGenres = (game: IgdbGame): string[] => {
   const names = (list?: { name: string }[]) => (list || []).map(x => x.name);
   const g = names(game.genres), t = names(game.themes), k = names(game.keywords);
-  const hits = RULES.filter(r =>
+  const hits: string[] = RULES.filter(r =>
     (r.genres && g.some(n => r.genres!.test(n))) ||
     (r.themes && t.some(n => r.themes!.test(n))) ||
     (r.keywords && k.some(n => r.keywords!.test(n)))
   ).map(r => r.genre as string);
+
+  // 互動式電影：IGDB 沒有這個類型。只有冒險（或點擊式冒險）類型、主題是劇情／驚悚／懸疑的遊戲（例如底特律：變人）
+  const gameplay = g.filter(n => !/^indie$/i.test(n));
+  if (!hits.includes('互動式電影') && gameplay.length > 0 && gameplay.every(n => /^adventure$|^point-and-click$/i.test(n)) && t.some(n => /^(drama|thriller|mystery)$/i.test(n))) {
+    hits.unshift('互動式電影');
+  }
+
+  // 解謎常是大型冒險遊戲的附屬要素（例如薩爾達），只有解謎是主要玩法時才算「休閒益智」
+  if (g.some(n => /^adventure$|role-playing|^platform$|^shooter$|hack and slash/i.test(n))) {
+    const i = hits.indexOf('休閒益智');
+    if (i >= 0) hits.splice(i, 1);
+  }
 
   // IGDB 把多數賽車、運動遊戲也標成 Simulator，這時不算「策略/模擬」
   let result = hits.includes('運動競速') && !g.some(n => /strategy|tactical|moba/i.test(n)) ? hits.filter(h => h !== '策略/模擬') : hits;
@@ -51,7 +63,7 @@ export const mapIgdbGenres = (game: IgdbGame): string[] => {
   // 來自 Adventure／Platform 等類型時，已有兩個以上更具體的類型才不加
   const specific = result.filter(h => h !== '動作冒險');
   const adventureByGenre = g.some(n => /^adventure$|^platform$|hack and slash/i.test(n));
-  if (specific.length >= 2 || (specific.length >= 1 && !adventureByGenre)) result = specific;
+  if (specific.length >= 2 || (specific.length >= 1 && !adventureByGenre) || result.includes('互動式電影')) result = specific;
   return result.slice(0, MAX_GENRES);
 };
 
