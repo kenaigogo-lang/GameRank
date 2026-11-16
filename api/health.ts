@@ -100,7 +100,7 @@ const checks = async (): Promise<Record<string, Check>> => {
     }));
     return { ok: true, detail: out.join('；') };
   });
-  return { '類型判斷（IGDB）': genreCheck, '登入驗證': login, 'Steam 封面搜尋': steam, 'IGDB 封面搜尋': igdb, 'AI 自動判斷（Gemini）': geminiCheck, 'Google 封面搜尋': google };
+  return { '類型判斷（IGDB）': genreCheck, '登入驗證': login, 'Steam 封面搜尋': steam, 'IGDB 封面搜尋': igdb, '類型判斷備援（Gemini，可不設定）': geminiCheck, 'Google 封面搜尋': google };
 };
 
 export const GET = async (request: Request) => {

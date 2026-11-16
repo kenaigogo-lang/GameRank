@@ -76,8 +76,13 @@ export const searchIgdbGames = async (title: string): Promise<{ term: string; ga
   )) || [];
   const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]/g, '');
   const exact = (x: IgdbGame) => norm(x.name) === norm(term);
+  // 名稱裡的數字（代數）要對得上，例如「地平線 5」不能選到 6 代
+  const numbers = `${title} ${term}`.match(/\d+/g) || [];
+  const numbersMatch = (x: IgdbGame) => numbers.every(n => new RegExp(`(^|\\D)${n}(\\D|$)`).test(x.name));
+  // 合輯、同捆包放後面
+  const isMain = (x: IgdbGame) => !/\b(double pack|bundle|collection|pack)\b/i.test(x.name);
   // 同名遊戲可能有好幾款（例如 1980 年代也有叫 Hades 的遊戲），以評分人數判斷哪個才是大家說的那款
-  return { term, games: [...games].sort((a, b) => Number(exact(b)) - Number(exact(a)) || (b.total_rating_count ?? 0) - (a.total_rating_count ?? 0)) };
+  return { term, games: [...games].sort((a, b) => Number(exact(b)) - Number(exact(a)) || Number(numbersMatch(b)) - Number(numbersMatch(a)) || Number(isMain(b)) - Number(isMain(a)) || (b.total_rating_count ?? 0) - (a.total_rating_count ?? 0)) };
 };
 
 /** 用 IGDB 查遊戲類型；找不到或沒設定 IGDB 時回傳 null */

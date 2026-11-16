@@ -10,7 +10,9 @@ const wikiEnglish = async (params: string): Promise<string | null> => {
   if (!res.ok) return null;
   const pages = Object.values((await res.json()).query?.pages || {}) as { index?: number; langlinks?: { '*': string }[] }[];
   pages.sort((x, y) => (x.index ?? 0) - (y.index ?? 0));
-  return pages.find(p => p.langlinks?.length)?.langlinks?.[0]?.['*'] ?? null;
+  const title = pages.find(p => p.langlinks?.length)?.langlinks?.[0]?.['*'];
+  // 維基百科用括號區分同名條目，例如「Resident Evil 4 (2023 video game)」，查 IGDB 時要拿掉
+  return title ? title.replace(/\s*\([^)]*\)\s*$/, '').trim() : null;
 };
 
 // 中文名稱先用維基百科的跨語言連結換成英文，IGDB 對中文支援很弱。
