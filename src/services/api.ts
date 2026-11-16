@@ -5,9 +5,15 @@ const callApi = async (path: string, params: Record<string, string>): Promise<Re
   const user = auth.currentUser;
   if (!user) throw new Error('請先登入才能使用這個功能。');
   const token = await user.getIdToken();
-  const res = await fetch(`/api/${path}?${new URLSearchParams(params)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api/${path}?${new URLSearchParams(params)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch (error: any) {
+    throw new Error(error?.name === 'TimeoutError' ? '等太久沒有回應，請稍後再試。' : '連不上伺服器，請檢查網路。');
+  }
   const type = res.headers.get('content-type') || '';
   if (!res.ok) {
     const data = type.includes('json') ? await res.json().catch(() => null) : null;

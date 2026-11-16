@@ -85,6 +85,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
   const [notice, setNotice] = useState('');
 
   const [isGettingInfo, setIsGettingInfo] = useState(false);
+  const [genreMessage, setGenreMessage] = useState('');
 
   const [isTagSelectorOpen, setIsTagSelectorOpen] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -114,17 +115,18 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
   const handleGetInfo = async () => {
     if (!title) return;
     setIsGettingInfo(true);
+    setGenreMessage('');
     try {
       const genre = await fetchGenre(title);
       const matched = GENRE_OPTIONS.find(g => g === genre);
       if (matched) {
-        setSelectedGenres([matched]);
-        setNotice('');
+        setSelectedGenres(prev => (prev.includes(matched) ? prev : [...prev, matched]));
+        setGenreMessage(`AI 判斷為「${matched}」，已幫你選上。`);
       } else {
-        setNotice('AI 判斷不出這款遊戲的類型，請手動選擇。');
+        setGenreMessage('AI 判斷不出這款遊戲的類型，請手動選擇。');
       }
     } catch (error: any) {
-      setNotice(`AI 自動判斷失敗：${error?.message || '請稍後再試'}`);
+      setGenreMessage(`AI 自動判斷失敗：${error?.message || '請稍後再試'}`);
     } finally {
       setIsGettingInfo(false);
     }
@@ -321,6 +323,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
                 {isGettingInfo ? <><span className="spin" /> 判斷中</> : 'AI 自動判斷'}
               </button>
             </div>
+            {genreMessage && <p className="hint notice" role="status">{genreMessage}</p>}
             <div className="chips">
               {GENRE_OPTIONS.map(g => (
                 <button key={g} type="button" aria-pressed={selectedGenres.includes(g)} className={`chip${selectedGenres.includes(g) ? ' on' : ''}`} onClick={() => toggleGenre(g)}>{g}</button>
