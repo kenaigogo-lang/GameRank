@@ -1,5 +1,6 @@
 import { env, fetchWithTimeout, HttpError, json } from './_lib/auth.js';
 import { generateText } from './_lib/gemini.js';
+import { genresFromIgdb } from './_lib/genres.js';
 
 /**
  * 設定檢查頁。
@@ -90,7 +91,16 @@ const checks = async (): Promise<Record<string, Check>> => {
       return res.ok ? { ok: true, detail: '可連線' } : { ok: false, detail: await errorText(res) };
     }),
   ]);
-  return { '登入驗證': login, 'Steam 封面搜尋': steam, 'IGDB 封面搜尋': igdb, 'AI 自動判斷（Gemini）': geminiCheck, 'Google 封面搜尋': google };
+  const genreCheck = await run(async () => {
+    if (!igdbId || !igdbSecret) return { ok: false, detail: '缺少 IGDB 設定' };
+    const samples = ['Elden Ring', 'Hollow Knight', 'Hades', '底特律：變人', 'Street Fighter 6'];
+    const out = await Promise.all(samples.map(async t => {
+      const r = await genresFromIgdb(t);
+      return `${t} → ${r ? `${r.genres.join('、')}（IGDB：${r.matched}）` : '查不到'}`;
+    }));
+    return { ok: true, detail: out.join('；') };
+  });
+  return { '類型判斷（IGDB）': genreCheck, '登入驗證': login, 'Steam 封面搜尋': steam, 'IGDB 封面搜尋': igdb, 'AI 自動判斷（Gemini）': geminiCheck, 'Google 封面搜尋': google };
 };
 
 export const GET = async (request: Request) => {

@@ -34,8 +34,16 @@ export interface UnifiedGame {
 export const searchCovers = async (query: string): Promise<{ results: UnifiedGame[]; failed: string[] }> =>
   (await callApi('cover-search', { q: query })).json();
 
-export const fetchGenre = async (title: string): Promise<string | null> =>
-  (await (await callApi('genre', { title })).json()).genre ?? null;
+export interface GenreResult {
+  genres: string[];
+  /** IGDB：依遊戲資料庫的資料；AI：IGDB 查不到時由 Gemini 判斷 */
+  source: 'IGDB' | 'AI';
+  /** IGDB 對應到的遊戲名稱 */
+  matched?: string;
+}
+
+export const fetchGenre = async (title: string): Promise<GenreResult> =>
+  (await callApi('genre', { title })).json();
 
 /** 透過伺服器轉送圖片（給不允許跨網域讀取的圖片網站用） */
 export const fetchImageViaProxy = async (url: string): Promise<Blob> =>

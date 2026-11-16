@@ -117,16 +117,17 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
     setIsGettingInfo(true);
     setGenreMessage('');
     try {
-      const genre = await fetchGenre(title);
-      const matched = GENRE_OPTIONS.find(g => g === genre);
-      if (matched) {
-        setSelectedGenres(prev => (prev.includes(matched) ? prev : [...prev, matched]));
-        setGenreMessage(`AI 判斷為「${matched}」，已幫你選上。`);
+      const { genres, source, matched } = await fetchGenre(title);
+      const valid = GENRE_OPTIONS.filter(g => genres.includes(g));
+      if (valid.length > 0) {
+        setSelectedGenres(prev => [...prev, ...valid.filter(g => !prev.includes(g))]);
+        const from = source === 'IGDB' ? `依 IGDB 資料${matched ? `（${matched}）` : ''}` : 'AI';
+        setGenreMessage(`${from}判斷為「${valid.join('、')}」，已幫你選上。`);
       } else {
-        setGenreMessage('AI 判斷不出這款遊戲的類型，請手動選擇。');
+        setGenreMessage('判斷不出這款遊戲的類型，請手動選擇。');
       }
     } catch (error: any) {
-      setGenreMessage(`AI 自動判斷失敗：${error?.message || '請稍後再試'}`);
+      setGenreMessage(`自動判斷失敗：${error?.message || '請稍後再試'}`);
     } finally {
       setIsGettingInfo(false);
     }
@@ -320,7 +321,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onS
             <div className="flh">
               <span>類型（可複選）</span>
               <button type="button" className="link" onClick={handleGetInfo} disabled={!title || isGettingInfo}>
-                {isGettingInfo ? <><span className="spin" /> 判斷中</> : 'AI 自動判斷'}
+                {isGettingInfo ? <><span className="spin" /> 判斷中</> : '自動判斷'}
               </button>
             </div>
             {genreMessage && <p className="hint notice" role="status">{genreMessage}</p>}

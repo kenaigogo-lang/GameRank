@@ -1,4 +1,5 @@
 import { env, fetchWithTimeout, handle, HttpError, json, requireUser } from './_lib/auth.js';
+import { igdbConfigured, igdbQuery, igdbSearchTerm, quote } from './_lib/igdb.js';
 
 /**
  * 同時搜尋 Steam、IGDB、Google 圖片，回傳統一格式的封面清單。
@@ -11,8 +12,6 @@ export interface UnifiedGame {
   coverUrl: string;
   source: 'STEAM' | 'IGDB' | 'GOOGLE';
 }
-
-const HAS_CJK = /[\u3400-\u9fff]/;
 
 const searchSteam = async (query: string): Promise<UnifiedGame[]> => {
   const url = `https://store.steampowered.com/api/storesearch/?l=tchinese&cc=TW&term=${encodeURIComponent(query)}`;
@@ -27,45 +26,14 @@ const searchSteam = async (query: string): Promise<UnifiedGame[]> => {
   }));
 };
 
-// 中文名稱先用維基百科的跨語言連結換成英文，IGDB 對中文支援很弱
-const englishTitle = async (query: string): Promise<string | null> => {
-  const url = `https://zh.wikipedia.org/w/api.php?action=query&format=json&prop=langlinks&lllang=en&redirects=1&titles=${encodeURIComponent(query)}`;
-  const res = await fetchWithTimeout(url, { headers: { 'user-agent': 'GameRank/1.0 (cover search)' } }, 5000);
-  if (!res.ok) return null;
-  const pages = (await res.json()).query?.pages || {};
-  const page = Object.values(pages)[0] as { langlinks?: { '*': string }[] } | undefined;
-  return page?.langlinks?.[0]?.['*'] ?? null;
-};
-
-let igdbToken: { value: string; expiresAt: number } | null = null;
-
-const getIgdbToken = async (clientId: string, secret: string) => {
-  if (igdbToken && Date.now() < igdbToken.expiresAt) return igdbToken.value;
-  const res = await fetchWithTimeout(
-    `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${secret}&grant_type=client_credentials`,
-    { method: 'POST' }
-  );
-  if (!res.ok) throw new Error(`Twitch auth ${res.status}`);
-  const data = await res.json();
-  igdbToken = { value: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 - 60_000 };
-  return igdbToken.value;
-};
-
 const searchIgdb = async (query: string): Promise<UnifiedGame[]> => {
-  const clientId = env('IGDB_CLIENT_ID');
-  const secret = env('IGDB_CLIENT_SECRET');
-  if (!clientId || !secret) return [];
-  const term = HAS_CJK.test(query) ? (await englishTitle(query).catch(() => null)) || query : query;
-  const token = await getIgdbToken(clientId, secret);
-  const res = await fetchWithTimeout('https://api.igdb.com/v4/games', {
-    method: 'POST',
-    headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
-    body: `search "${term.replace(/["\\]/g, '')}"; fields name, cover.url; limit 20; where cover != null;`,
-  });
-  if (res.status === 401) igdbToken = null;
-  if (!res.ok) throw new Error(`IGDB ${res.status}`);
-  const results: { id: number; name: string; cover?: { url: string } }[] = await res.json();
-  return results
+  if (!igdbConfigured()) return [];
+  const term = await igdbSearchTerm(query);
+  const results = await igdbQuery<{ id: number; name: string; cover?: { url: string } }[]>(
+    'games',
+    `search ${quote(term)}; fields name, cover.url; limit 20; where cover != null;`
+  );
+  return (results || [])
     .filter(g => g.cover?.url)
     .map(g => ({
       id: `igdb-${g.id}`,
