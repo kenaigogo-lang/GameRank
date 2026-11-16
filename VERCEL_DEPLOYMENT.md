@@ -44,7 +44,7 @@ GEMINI_MODEL=             # 選填，預設 gemini-2.5-flash
 
 - IGDB：Twitch Developer Console → 你的應用 → New Secret
 - Google API Key：Google Cloud Console → APIs & Services → Credentials → 重新產生或刪除舊金鑰，並限制只能用 Custom Search API
-- Gemini：Google AI Studio → API keys
+- Gemini：Google AI Studio → API keys。建議建在**沒有綁帳單的專案**（Billing Tier 顯示 Free）：綁了付費帳單的專案不走免費額度，預付餘額用完時每次呼叫都會回 402「prepayment credits are depleted」
 
 產生新的之後，更新上面的 Vercel 環境變數，再重新部署一次。
 
