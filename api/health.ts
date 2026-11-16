@@ -1,4 +1,5 @@
-import { env, fetchWithTimeout, json } from './_lib/auth.js';
+import { env, fetchWithTimeout, HttpError, json } from './_lib/auth.js';
+import { generateText } from './_lib/gemini.js';
 
 /**
  * 設定檢查頁。
@@ -39,6 +40,7 @@ const run = async (fn: () => Promise<Check>): Promise<Check> => {
   try {
     return await fn();
   } catch (error: any) {
+    if (error instanceof HttpError) return { ok: false, detail: error.message };
     return { ok: false, detail: `連線失敗：${error?.name === 'TimeoutError' ? '逾時' : error?.message || error}` };
   }
 };
@@ -78,27 +80,9 @@ const checks = async (): Promise<Record<string, Check>> => {
     }),
     run(async () => {
       if (!gemini) return { ok: false, detail: '缺少 GEMINI_API_KEY' };
-      // 列出可用模型是免費的，順便確認要用的模型還在不在
-      const res = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', { headers: { 'x-goog-api-key': gemini } });
-      if (!res.ok) return { ok: false, detail: `Gemini 拒絕這把金鑰（${await errorText(res)}）` };
-      const names: string[] = ((await res.json()).models || []).map((m: { name: string }) => m.name.replace('models/', ''));
-      const wanted = [env('GEMINI_MODEL'), 'gemini-flash-latest', 'gemini-2.5-flash'].filter(Boolean) as string[];
-      const usable = wanted.filter(m => names.includes(m));
-      if (usable.length) {
-        // 列模型不吃額度，帳單或額度問題要實際產生一次才測得出來（只要求回一個字）
-        const gen = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${usable[0]}:generateContent`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-goog-api-key': gemini },
-          body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with the single word OK.' }] }] }),
-        }, 20000);
-        if (!gen.ok) {
-          const why = await errorText(gen);
-          return { ok: false, detail: /credit|billing|prepay/i.test(why) ? `金鑰有效，但所屬專案的帳單額度用完了（${why}）` : `金鑰有效，但產生內容失敗（${why}）` };
-        }
-      }
-      return usable.length
-        ? { ok: true, detail: `金鑰有效，實際呼叫 ${usable[0]} 成功` }
-        : { ok: false, detail: `金鑰有效，但 ${wanted.join('、')} 都不在可用清單裡。可用的 flash 模型：${names.filter(n => n.includes('flash')).slice(0, 8).join('、') || '（無）'}。請把其中一個填到 GEMINI_MODEL` };
+      // 和 AI 自動判斷走同一套流程（含忙碌時換模型），只要求回一個字
+      const { model, tried } = await generateText('Reply with the single word OK.');
+      return { ok: true, detail: `實際呼叫成功，使用 ${model}${tried.length > 1 ? `（先試過 ${tried.slice(0, -1).join('、')}）` : ''}` };
     }),
     run(async () => {
       if (!googleKey || !cx) return { ok: false, detail: '沒有設定 GOOGLE_API_KEY／GOOGLE_CX，封面搜尋會略過 Google（不影響 Steam、IGDB）' };
