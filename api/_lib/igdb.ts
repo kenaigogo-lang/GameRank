@@ -4,22 +4,30 @@ import { env, fetchWithTimeout } from './auth.js';
 
 const HAS_CJK = /[\u3400-\u9fff]/;
 
-const wikiEnglish = async (params: string): Promise<string | null> => {
-  const url = `https://zh.wikipedia.org/w/api.php?action=query&format=json&prop=langlinks&lllang=en&redirects=1&${params}`;
+/** 查中文維基條目對應的英文名稱，依搜尋排名回傳 */
+const wikiEnglish = async (params: string): Promise<string[]> => {
+  const url = `https://zh.wikipedia.org/w/api.php?action=query&format=json&prop=langlinks&lllang=en&lllimit=50&redirects=1&${params}`;
   const res = await fetchWithTimeout(url, { headers: { 'user-agent': 'GameRank/1.0 (cover search)' } }, 5000);
-  if (!res.ok) return null;
+  if (!res.ok) return [];
   const pages = Object.values((await res.json()).query?.pages || {}) as { index?: number; langlinks?: { '*': string }[] }[];
-  pages.sort((x, y) => (x.index ?? 0) - (y.index ?? 0));
-  const title = pages.find(p => p.langlinks?.length)?.langlinks?.[0]?.['*'];
-  // 維基百科用括號區分同名條目，例如「Resident Evil 4 (2023 video game)」，查 IGDB 時要拿掉
-  return title ? title.replace(/\s*\([^)]*\)\s*$/, '').trim() : null;
+  return pages
+    .sort((x, y) => (x.index ?? 0) - (y.index ?? 0))
+    .map(p => p.langlinks?.[0]?.['*'])
+    .filter((t): t is string => !!t)
+    // 維基百科用括號區分同名條目，例如「Resident Evil 4 (2023 video game)」，查 IGDB 時要拿掉
+    .map(t => t.replace(/\s*\([^)]*\)\s*$/, '').trim());
 };
 
 // 中文名稱先用維基百科的跨語言連結換成英文，IGDB 對中文支援很弱。
-// 條目名稱不完全一樣時（空格、簡繁寫法、副標題），改用維基百科搜尋找最接近的條目。
-export const englishTitle = async (query: string): Promise<string | null> =>
-  (await wikiEnglish(`titles=${encodeURIComponent(query)}`)) ||
-  (await wikiEnglish(`generator=search&gsrlimit=3&gsrsearch=${encodeURIComponent(query)}`));
+// 條目名稱不完全一樣時（空格、簡繁寫法、副標題），改用維基百科搜尋；
+// 搜尋結果要和輸入的代數一致（「地平線 5」不能換成 6 代的條目）。
+export const englishTitle = async (query: string): Promise<string | null> => {
+  const direct = await wikiEnglish(`titles=${encodeURIComponent(query)}`);
+  if (direct[0]) return direct[0];
+  const numbers = query.match(/\d+/g) || [];
+  const found = await wikiEnglish(`generator=search&gsrlimit=5&gsrsearch=${encodeURIComponent(query)}`);
+  return found.find(t => numbers.every(n => new RegExp(`(^|\\D)${n}(\\D|$)`).test(t))) ?? null;
+};
 
 /** 給 IGDB 用的搜尋字：中文會先嘗試換成英文 */
 export const igdbSearchTerm = async (query: string) =>
