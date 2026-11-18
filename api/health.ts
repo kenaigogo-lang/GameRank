@@ -1,4 +1,4 @@
-import { env, fetchWithTimeout, HttpError, json } from './_lib/auth.js';
+import { env, fetchWithTimeout, HttpError, json, requireUser } from './_lib/auth.js';
 import { generateText } from './_lib/gemini.js';
 import { genresFromIgdb, mapIgdbGenres, searchIgdbGames } from './_lib/genres.js';
 
@@ -6,7 +6,7 @@ import { genresFromIgdb, mapIgdbGenres, searchIgdbGames } from './_lib/genres.js
  * 設定檢查頁。
  * - /api/health：列出伺服器端各項設定有沒有設（金鑰只顯示末 4 碼，方便對照是哪一把）。
  * - /api/health?check=1：用這些設定實際連一次各個外部服務，回報成功或失敗原因。
- *   只做免費或極少量的呼叫：Google 搜尋用掉每日 100 次中的 1 次，Gemini 用掉免費額度中的 1 次。
+ *   未登入只做免費的檢查；登入時才會實際做一次 Google 搜尋（每日 100 次中的 1 次）與 Gemini 產生內容。
  */
 
 const tail = (value?: string) => (value ? `…${value.slice(-4)}` : null);
@@ -46,7 +46,7 @@ const run = async (fn: () => Promise<Check>): Promise<Check> => {
   }
 };
 
-const checks = async (): Promise<Record<string, Check>> => {
+const checks = async (signedIn: boolean): Promise<Record<string, Check>> => {
   const projectId = env('FIREBASE_PROJECT_ID');
   const igdbId = env('IGDB_CLIENT_ID');
   const igdbSecret = env('IGDB_CLIENT_SECRET');
@@ -81,12 +81,19 @@ const checks = async (): Promise<Record<string, Check>> => {
     }),
     run(async () => {
       if (!gemini) return { ok: false, detail: '缺少 GEMINI_API_KEY' };
+      if (!signedIn) {
+        // 未登入只做免費的檢查（列出模型），不消耗產生內容的額度
+        const res = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': gemini } });
+        return res.ok ? { ok: true, detail: '金鑰有效（未登入只檢查金鑰；登入後才會實際呼叫一次）' } : { ok: false, detail: `Gemini 拒絕這把金鑰（${await errorText(res)}）` };
+      }
       // 和 AI 自動判斷走同一套流程（含忙碌時換模型），只要求回一個字
       const { model, tried } = await generateText('Reply with the single word OK.');
       return { ok: true, detail: `實際呼叫成功，使用 ${model}${tried.length > 1 ? `（先試過 ${tried.slice(0, -1).join('、')}）` : ''}` };
     }),
     run(async () => {
       if (!googleKey || !cx) return { ok: false, detail: '沒有設定 GOOGLE_API_KEY／GOOGLE_CX，封面搜尋會略過 Google（不影響 Steam、IGDB）' };
+      // 每次搜尋都會用掉每天 100 次的免費額度，只給登入的人測
+      if (!signedIn) return { ok: true, detail: '已設定（實際搜尋會用掉額度，登入後才會測試）' };
       const res = await fetchWithTimeout(`https://www.googleapis.com/customsearch/v1?key=${googleKey}&cx=${cx}&q=elden%20ring&searchType=image&num=1`);
       return res.ok ? { ok: true, detail: '可連線' } : { ok: false, detail: await errorText(res) };
     }),
@@ -124,7 +131,12 @@ export const GET = async (request: Request) => {
   }
   const deep = params.get('check') === '1';
   const body: Record<string, unknown> = { settings: settings() };
-  if (deep) body.checks = await checks();
+  if (deep) {
+    // 會用到付費／有限額度的測試（Google 搜尋、Gemini 產生內容）只給登入的人跑，免得網址被拿去消耗額度
+    const signedIn = await requireUser(request).then(() => true, () => false);
+    body.checks = await checks(signedIn);
+    if (!signedIn) body.note = '未登入：只做不消耗額度的檢查。帶登入憑證呼叫才會實際測試 Google 搜尋與 Gemini。';
+  }
   else body.hint = '加上 ?check=1 會實際連線測試每個服務';
   return json(body);
 };
