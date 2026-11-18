@@ -26,12 +26,12 @@
 
 ### 存放位置
 
-- `users/{uid}/backups/{gameId}`：主要資料來源，開站時讀這裡。另有 `backupOrder`、`updatedAt` 欄位。
-- `games/{gameId}`：舊的集合，每筆多一個 `userId`。`backups` 沒有資料時才讀它。
+- `users/{uid}/backups/{gameId}`：唯一的資料來源，開站時讀這裡，新增與編輯也只寫這裡。另有 `backupOrder`、`updatedAt` 欄位。
+- `games/{gameId}`：AI Studio 時期的舊集合，每筆多一個 `userId`。只在 `backups` 沒有資料時讀取（並自動複製一份到 `backups`），或 `backups` 寫入被權限拒絕時當備援；刪除遊戲時會順手清掉。
 - `users/{uid}`：備份摘要（`gameCount`、`backupUpdatedAt`）。
 - Storage `covers/{uid}/{gameId}-{時間}.jpg`：封面圖，每次換封面都是新檔名，舊檔會刪除。
 
-新增、編輯、刪除時，兩個集合都只寫那一筆，其中一處成功就算存好。「雲端備份」與匯入 JSON 是少數會整批重寫 `backups` 的操作。
+新增、編輯、刪除時只寫那一筆。「雲端備份」與匯入 JSON 是少數會整批重寫 `backups` 的操作。
 
 ## 儲存流程
 
@@ -47,7 +47,8 @@
 | 路徑 | 用途 | 需要的環境變數 |
 |---|---|---|
 | `GET /api/cover-search?q=` | 同時搜尋 Steam、IGDB、Google 圖片的封面。中文名稱先用維基百科換成英文再查 IGDB。單一來源失敗不影響其他來源。 | `IGDB_CLIENT_ID`、`IGDB_CLIENT_SECRET`、`GOOGLE_API_KEY`、`GOOGLE_CX` |
-| `GET /api/genre?title=` | 用 Gemini 從固定清單選一個類型 | `GEMINI_API_KEY`（選填 `GEMINI_MODEL`） |
+| `GET /api/genre?title=` | 先查 IGDB 的類型／主題／關鍵字並對應到 14 個類型（最多 3 個）；查不到才請 Gemini 判斷，模型忙碌或停用時自動換模型 | IGDB 設定；選填 `GEMINI_API_KEY`、`GEMINI_MODEL` |
+| `GET /api/health` | 設定檢查。`?check=1` 實際連線測試（未登入只做不耗額度的檢查）；`?igdb=名稱` 顯示 IGDB 原始資料與類型對應結果 | — |
 | `GET /api/image?url=` | 圖片轉送。有些圖片網站不允許跨網域讀取，瀏覽器無法縮圖時才走這裡。只轉送圖片、上限 8 MB、不轉送內網位址。 | — |
 
 所有函式都需要 `FIREBASE_PROJECT_ID` 來驗證登入憑證。舊的 `VITE_` 前綴名稱目前仍相容。
@@ -74,3 +75,5 @@
 - 評語可從正面／負面／中性三組形容標籤挑最多 5 個。
 - 匯出／匯入 JSON；登入時可整批備份到雲端或從雲端還原。
 - 兩套主題一鍵切換，選擇記在瀏覽器裡。
+- 清單內搜尋：名稱或評語，忽略大小寫、空白與標點。
+- 開站先顯示這台裝置上次的清單，同時向雲端更新（標示 SYNCING）；同步完成前不能整批備份或匯入。登出時清除。

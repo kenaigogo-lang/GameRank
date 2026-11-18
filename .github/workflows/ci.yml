@@ -1,0 +1,35 @@
+name: CI
+
+# 每次推送與 PR 都跑：型別檢查、測試、建置。Vercel 只負責部署，這裡確保程式沒壞。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 型別檢查（前端與 api/）
+        run: npm run typecheck
+      - name: 測試
+        run: npm test
+      - name: 建置
+        run: npm run build
+        env:
+          # 建置只需要 Firebase 的公開設定格式正確，用假值即可
+          VITE_FIREBASE_API_KEY: ci-placeholder
+          VITE_FIREBASE_AUTH_DOMAIN: ci.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: ci
+          VITE_FIREBASE_STORAGE_BUCKET: ci.appspot.com
+          VITE_FIREBASE_APP_ID: '1:1:web:1'
