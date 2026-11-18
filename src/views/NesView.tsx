@@ -39,7 +39,7 @@ export const NesView = (p: ViewProps) => {
           <progress className="nes-progress is-primary" value={Number(p.stats.avgScore)} max={10} aria-label="平均分數" />
           <p className="scope">
             <span>{scopeLabel(p.activeTab)}</span>
-            <span className={`sync${p.isSaving ? ' busy' : ''}`} role="status" aria-live="polite">{p.isSaving ? 'NOW SAVING...' : ''}</span>
+            <span className={`sync${p.isSaving || p.isSyncing ? ' busy' : ''}`} role="status" aria-live="polite">{p.isSaving ? 'NOW SAVING...' : p.isSyncing ? 'SYNCING...' : ''}</span>
           </p>
         </section>
 
@@ -49,6 +49,12 @@ export const NesView = (p: ViewProps) => {
               {tab === 'ALL' ? '全部' : tab} {p.tabCounts[tab]}
             </button>
           ))}
+        </div>
+
+        <div className="find" role="search">
+          <label htmlFor="game-search" className="sr-only">搜尋遊戲</label>
+          <input id="game-search" type="search" className="nes-input" value={p.searchText} onChange={(e) => p.onSearch(e.target.value)} placeholder="搜尋遊戲名稱或評語…" autoComplete="off" />
+          {p.searchText && <span className="find-count">找到 {p.games.length} 款</span>}
         </div>
 
         <div className="bar">

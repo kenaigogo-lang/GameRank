@@ -160,4 +160,8 @@ html[data-theme="nes"] {
   .notice-bar p { flex: 1 1 280px; }
   /* 像素字體太寬，日期欄位放不下，改用一般字體 */
   .mrow input[type="date"], .mrow input[type="number"] { font-family: var(--tc); font-size: 15px; font-weight: 700; }
+  .find { display: flex; align-items: center; gap: 12px; }
+  .find input { flex: 1; min-width: 0; font: 700 14px/1.4 var(--tc); }
+  .find-count { flex: none; font: 700 12px var(--tc); color: var(--mut); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }

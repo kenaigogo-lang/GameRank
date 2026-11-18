@@ -1,0 +1,287 @@
+{
+ "_note": "2026-11 從 IGDB 抓下的真實資料（/api/health?igdb=名稱），用來測試類型對應規則。關鍵字只保留前 40 個。",
+ "Hollow Knight": {
+  "genres": [
+   "Platform",
+   "Adventure",
+   "Indie"
+  ],
+  "themes": [
+   "Action",
+   "Fantasy"
+  ],
+  "keywords": [
+   "dark",
+   "sword",
+   "skill-based",
+   "2d",
+   "metroidvania",
+   "insects",
+   "action-adventure",
+   "steam",
+   "achievements",
+   "steam trading cards",
+   "explorable world",
+   "atmospheric",
+   "giant insects",
+   "silent protagonist",
+   "crowdfunding - kickstarter",
+   "hand-drawn",
+   "crowdfunding",
+   "2d platformer",
+   "boss fight",
+   "steam achievements",
+   "xbox controller support for pc",
+   "controller recommendation",
+   "crowd funded",
+   "shielded enemies",
+   "parrying",
+   "merchants",
+   "fast traveling",
+   "creature compendium",
+   "the game awards 2017",
+   "best debut indie game: nominee - 2017 (the game awards)",
+   "the game awards - nominee",
+   "controller support",
+   "the game awards - best debut indie game - nominee",
+   "interconnected-world",
+   "armed bugs",
+   "money",
+   "shop keeper",
+   "sidescroller",
+   "available on - luna plus",
+   "available on - luna gog"
+  ]
+ },
+ "Hades": {
+  "genres": [
+   "Role-playing (RPG)",
+   "Hack and slash/Beat 'em up",
+   "Adventure",
+   "Indie"
+  ],
+  "themes": [
+   "Action",
+   "Fantasy",
+   "Drama"
+  ],
+  "keywords": [
+   "greek mythology",
+   "roguelike",
+   "difficult",
+   "mythology",
+   "supernatural",
+   "stylized",
+   "dungeon crawler",
+   "story rich",
+   "the game awards - best score or music - nominee",
+   "roguelite",
+   "netflix",
+   "you can pet the dog",
+   "the game awards - best action game - winner",
+   "the game awards - best art direction - nominee",
+   "the game awards - best game direction - nominee",
+   "the game awards - best independent game - winner",
+   "the game awards - best narrative - nominee",
+   "the game awards - best performance - nominee",
+   "the game awards - game of the year - nominee",
+   "weapons"
+  ]
+ },
+ "Detroit: Become Human": {
+  "genres": [
+   "Adventure"
+  ],
+  "themes": [
+   "Action",
+   "Science fiction",
+   "Thriller",
+   "Drama",
+   "Mystery"
+  ],
+  "keywords": [
+   "neo noir",
+   "investigation",
+   "androids",
+   "female protagonist",
+   "multiple protagonists",
+   "pax west 2017",
+   "david cage"
+  ]
+ },
+ "The Legend of Zelda: Tears of the Kingdom": {
+  "genres": [
+   "Puzzle",
+   "Adventure"
+  ],
+  "themes": [
+   "Action",
+   "Fantasy",
+   "Science fiction",
+   "Sandbox",
+   "Open world"
+  ],
+  "keywords": [
+   "hunting",
+   "sword",
+   "crafting",
+   "skydiving",
+   "cooking",
+   "sequel",
+   "silent protagonist",
+   "zelda",
+   "link",
+   "horse riding",
+   "throwing weapons",
+   "bow and arrow",
+   "weapon modification",
+   "the game awards - best score or music - nominee",
+   "male protagonist",
+   "horse taming",
+   "the game awards - best action-adventure game - winner",
+   "the game awards - best art direction - nominee",
+   "the game awards - most anticipated game - nominee",
+   "the game awards - best game direction - nominee",
+   "the game awards - game of the year - nominee",
+   "bees",
+   "the game awards - most anticipated game - winner"
+  ]
+ },
+ "Resident Evil 4": {
+  "genres": [
+   "Shooter",
+   "Adventure"
+  ],
+  "themes": [
+   "Action",
+   "Horror",
+   "Survival"
+  ],
+  "keywords": [
+   "zombies",
+   "monsters",
+   "bloody",
+   "minigames",
+   "quick-time events",
+   "maze",
+   "action-adventure",
+   "backtracking",
+   "achievements",
+   "time limit",
+   "mutants",
+   "traps",
+   "hostages",
+   "survival horror",
+   "dog",
+   "over the shoulder",
+   "countdown timer",
+   "alternate costumes",
+   "60 fps on consoles",
+   "sequel is in a different genre",
+   "profanity",
+   "retail games with steam activation",
+   "escort mission",
+   "black market",
+   "real-time combat",
+   "a.i. companion",
+   "male antagonist",
+   "instant kill",
+   "mercenary",
+   "catapult",
+   "cover system",
+   "destructible environment",
+   "interactive environments",
+   "been here before",
+   "game with chapters",
+   "animation canceling",
+   "wrestling moves in non-wrestling games",
+   "quick time event",
+   "evil organization",
+   "banter during gameplay"
+  ]
+ },
+ "Baldur's Gate 3": {
+  "genres": [
+   "Role-playing (RPG)",
+   "Strategy",
+   "Turn-based strategy (TBS)",
+   "Adventure"
+  ],
+  "themes": [
+   "Action",
+   "Fantasy"
+  ],
+  "keywords": [
+   "exploration",
+   "monsters",
+   "violence",
+   "bloody",
+   "medieval",
+   "character customization",
+   "dark",
+   "magic",
+   "turn-based",
+   "choose your own adventure",
+   "crafting",
+   "dark fantasy",
+   "demons",
+   "gore",
+   "multiple endings",
+   "traps",
+   "combat",
+   "grid-based movement",
+   "dice",
+   "nudity",
+   "dungeon crawler",
+   "good vs evil",
+   "party-based",
+   "choices matter",
+   "sexual content",
+   "tactical turn-based combat",
+   "customizable characters",
+   "leveling up",
+   "loot gathering",
+   "multiple storylines",
+   "character creation",
+   "moral decisions",
+   "branching storyline",
+   "betrayal",
+   "redemption",
+   "friendship",
+   "the game awards - best score or music - nominee",
+   "immersive",
+   "meaningful choices",
+   "turn-based rpg"
+  ]
+ },
+ "Ghost of Tsushima": {
+  "genres": [
+   "Role-playing (RPG)",
+   "Hack and slash/Beat 'em up",
+   "Adventure"
+  ],
+  "themes": [
+   "Action",
+   "Historical",
+   "Stealth",
+   "Drama",
+   "Open world"
+  ],
+  "keywords": [
+   "assassin",
+   "samurai",
+   "action-adventure",
+   "japan",
+   "feudal japan",
+   "horse riding",
+   "poisoning",
+   "the game awards - best action-adventure game - nominee",
+   "the game awards - best art direction - winner",
+   "the game awards - best audio design - nominee",
+   "the game awards - best game direction - nominee",
+   "the game awards - best narrative - nominee",
+   "the game awards - best performance - nominee",
+   "the game awards - game of the year - nominee"
+  ]
+ }
+}

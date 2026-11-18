@@ -7,6 +7,7 @@ import { ThemeContext, ThemeName, applyTheme, loadTheme } from './theme';
 import { AddGameModal } from './components/AddGameModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { signInWithGoogle, logout, getGames, getUserBackupGames, saveUserBackupGames, saveGameRecord, deleteGameRecord, updateGameCover, newGameId, auth, describeFirebaseError, missingFirebaseConfig } from './services/firebase';
+import { clearCachedGames, loadCachedGames, saveCachedGames } from './services/cache';
 import { deleteCoverFile, isInlineCover, prepareCover, storageUnavailableReason, uploadCover } from './services/covers';
 import { User, onAuthStateChanged } from 'firebase/auth';
 
@@ -32,6 +33,8 @@ const migrateGameData = (data: any[]): Game[] => {
   });
 };
 
+const normalizeSearch = (text: string) => text.toLowerCase().replace(/[\s:：・·'’"「」『』（）()\-—_.,，、!！?？#＃]/g, '');
+
 interface DialogState {
   isOpen: boolean;
   title: string;
@@ -47,10 +50,13 @@ const App = () => {
   const [activeTab, setActiveTab] = useState<'ALL' | Platform>('ALL');
   const [activeGenre, setActiveGenre] = useState<string>('ALL');
   const [sortOption, setSortOption] = useState<SortOption>('SCORE_DESC');
+  const [searchText, setSearchText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // 已先顯示這台裝置上次的清單，正在向雲端更新
+  const [isSyncing, setIsSyncing] = useState(false);
   // 背景中尚未完成的雲端寫入數量
   const [pendingWrites, setPendingWrites] = useState(0);
   const [theme, setTheme] = useState<ThemeName>(loadTheme);
@@ -79,29 +85,45 @@ const App = () => {
       setUser(currentUser);
       setLoadError(null);
       if (currentUser) {
-        setIsLoading(true);
+        const cached = loadCachedGames(currentUser.uid);
+        if (cached) setGames(cached);
+        setIsLoading(!cached);
+        setIsSyncing(true);
         try {
           let userGames = await getUserBackupGames(currentUser.uid);
           if (userGames.length === 0) {
             userGames = await getGames(currentUser.uid);
+            // 只有舊的 games 集合有資料：複製一份到 backups，之後就只讀寫 backups
+            if (userGames.length > 0) {
+              const legacy = userGames;
+              void saveUserBackupGames(currentUser.uid, legacy).catch(error => console.warn('Copying legacy games to backups failed', error));
+            }
           }
           setGames(userGames);
         } catch (e) {
           console.error('Error loading games', e);
           const reason = describeFirebaseError(e);
-          setGames([]);
-          setLoadError(reason);
+          // 有這台裝置上次的清單就繼續顯示，否則清空
+          if (!cached) setGames([]);
+          setLoadError(cached ? `${reason}（目前顯示的是這台裝置上次的清單）` : reason);
           showAlert('讀取存檔失敗', `${reason}\n\n雲端上的資料沒有被刪除，修正後重新整理就會回來。在那之前請不要按「雲端備份」或「匯入」。`);
         } finally {
           setIsLoading(false);
+          setIsSyncing(false);
         }
       } else {
         setGames([]);
         setIsLoading(false);
+        setIsSyncing(false);
       }
     });
     return unsubscribe;
   }, [showAlert]);
+
+  // 雲端資料同步完成後，每次變動都更新這台裝置上的副本
+  useEffect(() => {
+    if (user && !isSyncing && !loadError) saveCachedGames(user.uid, games);
+  }, [user, games, isSyncing, loadError]);
 
   // 建置時漏設 Firebase 設定，一開站就說清楚少了哪些
   useEffect(() => {
@@ -164,6 +186,7 @@ const App = () => {
   };
 
   const handleLogout = async () => {
+    clearCachedGames();
     await logout();
   };
 
@@ -297,6 +320,11 @@ const App = () => {
   };
 
   const handleRestoreJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isSyncing) {
+      e.target.value = '';
+      showAlert('請稍候', '正在從雲端讀取最新資料，讀取完成後再匯入。');
+      return;
+    }
     if (loadError) {
       e.target.value = '';
       showAlert('已取消匯入', `存檔還沒讀取成功，現在匯入可能覆蓋雲端資料。\n\n${loadError}`);
@@ -382,6 +410,10 @@ const App = () => {
       return;
     }
 
+    if (isSyncing) {
+      showAlert('請稍候', '正在從雲端讀取最新資料，讀取完成後再備份。');
+      return;
+    }
     if (loadError) {
       showAlert('已取消備份', `存檔還沒讀取成功，現在備份會用不完整的清單覆蓋雲端。\n\n${loadError}`);
       return;
@@ -417,9 +449,14 @@ const App = () => {
   );
 
   const filteredGames = useMemo(() => {
-    const filtered = activeGenre === 'ALL'
+    const byGenre = activeGenre === 'ALL'
       ? gamesInTab
       : gamesInTab.filter(g => (g.genre || '').split(', ').includes(activeGenre));
+    // 名稱或評語包含搜尋字（忽略大小寫、空白與標點，「地平線5」也找得到「地平線 5」）
+    const needle = normalizeSearch(searchText);
+    const filtered = needle
+      ? byGenre.filter(g => normalizeSearch(g.title).includes(needle) || normalizeSearch(g.comment || '').includes(needle))
+      : byGenre;
 
     // 先複製再排序，避免直接改動 state 裡的陣列
     return [...filtered].sort((a, b) => {
@@ -439,7 +476,7 @@ const App = () => {
           return normalizeScore(b.score) - normalizeScore(a.score);
       }
     });
-  }, [gamesInTab, activeGenre, sortOption]);
+  }, [gamesInTab, activeGenre, sortOption, searchText]);
 
   const stats = useMemo(() => {
     const total = gamesInTab.length;
@@ -512,6 +549,7 @@ const App = () => {
         loadFailed={!!loadError}
         isLoading={isLoading}
         isSaving={pendingWrites > 0}
+        isSyncing={isSyncing}
         version={APP_VERSION}
         stats={stats}
         tabs={platformTabs.tabs}
@@ -525,6 +563,8 @@ const App = () => {
         onSelectTab={selectTab}
         onSelectGenre={setActiveGenre}
         onSort={setSortOption}
+        searchText={searchText}
+        onSearch={setSearchText}
         onAdd={() => setIsModalOpen(true)}
         onEdit={handleEditGame}
         onDelete={handleDeleteGame}

@@ -17,6 +17,7 @@
 | `src/services/firebase.ts` | 登入、Firestore 讀寫（每次只寫變動的那一筆） |
 | `src/services/covers.ts` | 封面上傳到 Storage；Storage 不能用時退回存在資料庫 |
 | `src/services/api.ts` | 呼叫伺服器端函式 |
+| `src/services/cache.ts` | 把上次的清單存在裝置上，開站先顯示 |
 | `api/` | Vercel 函式：`cover-search`（Steam／IGDB／Google 封面搜尋）、`genre`（Gemini 類型判斷）、`image`（圖片轉送） |
 | `firestore.rules`、`storage.rules` | 建議的 Firebase 權限規則 |
 
@@ -42,6 +43,6 @@ npm run dev
 npx vercel dev
 ```
 
-其他指令：`npm run build`（型別檢查＋建置）、`npm run typecheck`（前端與 `api/` 都檢查）。
+其他指令：`npm run build`（型別檢查＋建置）、`npm run typecheck`（前端與 `api/` 都檢查）、`npm test`（自動化測試）。GitHub 上每次推送與 PR 都會自動跑型別檢查、測試與建置（`.github/workflows/ci.yml`）。
 
 部署與環境變數設定見 [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)，架構與資料格式見 [SPECIFICATION.md](SPECIFICATION.md)。
