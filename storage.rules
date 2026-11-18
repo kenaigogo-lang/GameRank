@@ -1,10 +1,12 @@
 rules_version = '2';
 
-// GameRank 封面：每個人只能寫自己資料夾裡的圖片。
-// 讀取用的是附帶權杖的下載網址，所以不需要開放 read。
+// GameRank 封面：每個人只能讀寫自己資料夾（covers/{自己的 uid}/）裡的圖片。
+// 網頁顯示封面用的是附帶權杖的下載網址，不受這裡的 read 限制；
+// read 是給上傳後「取得下載網址」那一步用的，所以也只開放給本人。
 service firebase.storage {
   match /b/{bucket}/o {
     match /covers/{uid}/{file} {
+      allow read: if request.auth != null && request.auth.uid == uid;
       allow create, update: if request.auth != null
         && request.auth.uid == uid
         && request.resource.size < 2 * 1024 * 1024
