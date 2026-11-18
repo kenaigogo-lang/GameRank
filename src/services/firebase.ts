@@ -194,11 +194,22 @@ export const saveUserBackupGames = async (userId: string, games: Game[]): Promis
 export const newGameId = (): string => doc(collection(db, 'games')).id;
 
 // 兩個存放位置都寫（讀取時以 backups 為主、games 為備援），只要其中一處成功就算存好。
-const settleEither = async (label: string, writes: Promise<unknown>[]): Promise<void> => {
-  const results = await Promise.allSettled(writes);
-  const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-  failures.forEach((f) => console.warn(`${label}: one store rejected the write`, f.reason));
-  if (failures.length === results.length) throw failures[0].reason;
+/**
+ * 資料只存一份：users/{uid}/backups/{gameId}（開站時讀的地方）。
+ * 舊的 games 集合是 AI Studio 時期的設計，只在 backups 寫入被拒絕時才當備援，
+ * 刪除時順手清掉，避免 backups 清空後舊資料又被讀回來。
+ */
+const backupRef = (userId: string, id: string) => doc(db, 'users', userId, 'backups', id);
+const legacyRef = (id: string) => doc(db, 'games', id);
+
+const writeWithFallback = async (label: string, primary: () => Promise<unknown>, legacy: () => Promise<unknown>) => {
+  try {
+    await primary();
+  } catch (error: any) {
+    if (!String(error?.code || '').includes('permission-denied')) throw error;
+    console.warn(`${label}: backups rejected the write, using the legacy games collection`, error);
+    await legacy();
+  }
 };
 
 /**
@@ -208,24 +219,24 @@ const settleEither = async (label: string, writes: Promise<unknown>[]): Promise<
 export const saveGameRecord = async (userId: string, game: Game, isNew: boolean): Promise<void> => {
   const { id, ...data } = game;
   const now = Date.now();
-  await settleEither('saveGameRecord', [
-    setDoc(doc(db, 'users', userId, 'backups', id), { ...game, updatedAt: now, ...(isNew ? { backupOrder: -now } : {}) }, { merge: true }),
-    setDoc(doc(db, 'games', id), { ...data, userId }, { merge: true }),
-  ]);
+  await writeWithFallback(
+    'saveGameRecord',
+    () => setDoc(backupRef(userId, id), { ...game, updatedAt: now, ...(isNew ? { backupOrder: -now } : {}) }, { merge: true }),
+    () => setDoc(legacyRef(id), { ...data, userId }, { merge: true })
+  );
 };
 
 /** 只更新封面網址（搬移封面用），不碰其他欄位 */
 export const updateGameCover = async (userId: string, id: string, imageUrl: string): Promise<void> => {
-  const now = Date.now();
-  await settleEither('updateGameCover', [
-    setDoc(doc(db, 'users', userId, 'backups', id), { imageUrl, updatedAt: now }, { merge: true }),
-    setDoc(doc(db, 'games', id), { imageUrl, userId }, { merge: true }),
-  ]);
+  await writeWithFallback(
+    'updateGameCover',
+    () => setDoc(backupRef(userId, id), { imageUrl, updatedAt: Date.now() }, { merge: true }),
+    () => setDoc(legacyRef(id), { imageUrl, userId }, { merge: true })
+  );
 };
 
 export const deleteGameRecord = async (userId: string, id: string): Promise<void> => {
-  await settleEither('deleteGameRecord', [
-    deleteDoc(doc(db, 'users', userId, 'backups', id)),
-    deleteDoc(doc(db, 'games', id)),
-  ]);
+  await deleteDoc(backupRef(userId, id));
+  // 舊集合可能沒有這一筆，或規則不允許，失敗不影響結果
+  await deleteDoc(legacyRef(id)).catch(() => undefined);
 };

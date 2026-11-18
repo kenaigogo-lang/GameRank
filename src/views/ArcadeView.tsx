@@ -32,7 +32,7 @@ export const ArcadeView = (p: ViewProps) => {
         <button type="button" className="coin" data-add onClick={p.onAdd}>
           <i>INSERT COIN</i>＋ 新增遊戲
         </button>
-        <p className={`sync${p.isSaving ? ' busy' : ''}`} role="status" aria-live="polite">{p.isSaving ? 'NOW SAVING...' : ''}</p>
+        <p className={`sync${p.isSaving || p.isSyncing ? ' busy' : ''}`} role="status" aria-live="polite">{p.isSaving ? 'NOW SAVING...' : p.isSyncing ? 'SYNCING...' : ''}</p>
       </header>
 
       <main className="wrap">
@@ -45,6 +45,12 @@ export const ArcadeView = (p: ViewProps) => {
               <small>{p.tabCounts[tab]}</small>
             </button>
           ))}
+        </div>
+
+        <div className="find" role="search">
+          <label htmlFor="game-search" className="sr-only">搜尋遊戲</label>
+          <input id="game-search" type="search" value={p.searchText} onChange={(e) => p.onSearch(e.target.value)} placeholder="搜尋遊戲名稱或評語…" autoComplete="off" />
+          {p.searchText && <span className="find-count">找到 {p.games.length} 款</span>}
         </div>
 
         <div className="bar">
